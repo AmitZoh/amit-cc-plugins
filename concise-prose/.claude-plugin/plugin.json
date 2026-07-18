@@ -1,0 +1,15 @@
+{
+  "name": "concise-prose",
+  "version": "1.1.0",
+  "description": "Reshapes Claude Code output for fast human reading: conclusion first, only reasoning that carries information, and one list of everything needed from you at the end. Full grammar, no shorthand. Injected at session start, reinforced each turn so it doesn't decay, and enforced by a Stop hook that appends a standalone SUMMARY (plus OPEN ITEMS when needed) at the very end of every response.",
+  "author": {
+    "name": "Amit"
+  },
+  "license": "MIT",
+  "keywords": [
+    "output-style",
+    "concise",
+    "verbosity",
+    "tokens"
+  ]
+}

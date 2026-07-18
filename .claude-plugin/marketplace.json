@@ -1,0 +1,14 @@
+{
+  "name": "amit-cc-plugins",
+  "owner": {
+    "name": "AmitZoh",
+    "url": "https://github.com/AmitZoh"
+  },
+  "plugins": [
+    {
+      "name": "concise-prose",
+      "source": "./concise-prose",
+      "description": "Reshapes Claude Code output for fast human reading: conclusion first, only reasoning that carries information, and an enforced standalone SUMMARY (plus OPEN ITEMS when needed) at the end of every response via a Stop hook."
+    }
+  ]
+}
