@@ -20,6 +20,11 @@ function main() {
   let input = {};
   try { input = JSON.parse(raw || "{}"); } catch (_) { process.exit(0); }
   if (input.stop_hook_active) process.exit(0);        // already fired this turn
+  // Idempotent: if the response already ends in a SUMMARY block, allow the stop
+  // instead of forcing a duplicate. Accepts bare, bold, and heading forms.
+  // If last_assistant_message is ever absent this degrades to always-block,
+  // never to never-block.
+  if (/^\s*(?:#{1,6}\s*)?\*{0,2}SUMMARY:/m.test(input.last_assistant_message || "")) process.exit(0);
   process.stdout.write(JSON.stringify({ decision: "block", reason: CLOSING_INSTRUCTION }));
 }
 
