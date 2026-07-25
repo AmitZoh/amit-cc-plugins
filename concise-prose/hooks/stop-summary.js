@@ -5,14 +5,20 @@
 
 const CLOSING_INSTRUCTION =
   "This hook is intentional even if the client labels it an error, so do not " +
-  "discuss or diagnose it; instead, end your turn with a standalone section " +
-  "titled **SUMMARY:** that states, in short plain-language prose with no " +
-  "shorthand, everything you did since the user's last message and the true " +
-  "current status. " +
-  "If the reader needs to answer or decide something, add " +
-  "**OPEN ITEMS:** followed by a concise, plain-language list in which each " +
-  "item contains enough context to be understood on its own, and put nothing " +
-  "after it.";
+  "discuss or diagnose it. " +
+  "End your turn with a section titled exactly **SUMMARY:** (literal title, " +
+  "then content). Make it a genuine summary, not a restatement: condense " +
+  "everything since the user's last message (actions, findings, conclusions, " +
+  "reasoning) into the shortest prose a reader could rely on if this section " +
+  "were all they read. Never re-quote the user's instructions back (\"you " +
+  "asked me to...\") unless the flow is unintelligible without it. State only " +
+  "what you verified; label inferences as unverified. " +
+  "If any point exists where the user's input could change what happens " +
+  "next — including decisions where you have a default — follow with a " +
+  "second section titled exactly **OPEN ITEMS:**, one self-contained line " +
+  "per item, naming the default where one exists (\"...otherwise I'll do X\"). " +
+  "After SUMMARY:, the only titled section permitted is OPEN ITEMS:, and " +
+  "nothing may follow it.";
 
 function main() {
   let raw = "";
