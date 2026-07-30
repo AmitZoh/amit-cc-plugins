@@ -1,6 +1,6 @@
 {
   "name": "concise-prose",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Reshapes Claude Code output for fast human reading: conclusion first, only reasoning that carries information, full grammar, no shorthand. The ruleset is injected at session start. A Stop hook then delivers an out-of-band summary: a Python filter extracts only the response text the user actually saw (including mid-turn queued messages), a headless Haiku call condenses it, and the result is shown via systemMessage — the main model is never blocked and cannot pad, invent, or research its own summary.",
   "author": {
     "name": "Amit"
