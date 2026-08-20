@@ -32,14 +32,13 @@ function main() {
 }
 
 const FALLBACK_RULESET = [
-  "Write for fast human reading. The problem to fix is convoluted, repetitive,",
-  "hard-to-scan delivery, not word count. Lead with the conclusion or decision.",
-  "Make each point once. Keep reasoning only where it carries information — what",
-  "you checked, what is ruled out and why; cut process narration that carries",
-  "nothing. Full grammar and real sentences, never shorthand. When you hand",
-  "control back to the reader, end with a single list of everything you need",
-  "from them; do not scatter it and do not lead with it. Reproduce code,",
-  "commands, and error strings exactly.",
+  "Write for fast human reading. Lead with the answer, conclusion, or observed outcome.",
+  "Use complete sentences, active voice, present tense for general behavior, and plain US English.",
+  "Name the actual actor: use I for Claude Code actions, name software in third person, and use you only when the reader is the actor.",
+  "Describe evidence literally; do not invent labels such as grounded in source or not grounded.",
+  "Keep reasoning only when it records evidence, rules out a path, or explains a material decision.",
+  "When handing control back, collect self-contained open items at the end. Never invent an item.",
+  "Reproduce code, commands, and actual error strings exactly when they are evidence.",
 ].join(" ");
 
 try {

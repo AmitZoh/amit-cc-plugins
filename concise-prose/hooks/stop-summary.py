@@ -7,7 +7,8 @@ doubled output), this hook summarizes out-of-band:
 
   1. Extract the response text the user actually saw since the last summary
      (marker-delimited window over the session transcript).
-  2. Pipe it to a cheap headless model call (`claude -p --bare --model haiku`).
+  2. Pipe it to a cheap headless model call (`/Users/amitzohar/.local/bin/claude
+     -p --model haiku`, which keeps credential loading; see summarize()).
   3. Deliver the result via {"systemMessage": ...} — rendered by the client
      as "<hookName> says: <content>" — at zero main-model cost.
 
@@ -69,10 +70,23 @@ SUMMARIZER_PROMPT = (
     "more things incompletely. Three points a stranger can fully understand "
     "beat ten they cannot.\n"
     "\n"
+    "STYLE:\n"
+    "- Follow the Google Developer Documentation Style Guide. Use active "
+    "voice, present tense for general behavior, complete sentences, plain "
+    "US English, and globally understandable wording.\n"
+    "- Name the actual actor. When summarizing main-agent actions, say "
+    "'Claude Code' rather than using 'you'. Use 'you' only when the reader "
+    "is actually the actor. Name software components in third person.\n"
+    "- Do not invent meta-labels or status vocabulary. State what was checked "
+    "and what it established. Never replace concrete evidence with phrases "
+    "such as 'grounded in source' or 'not grounded'.\n"
+    "- Avoid jargon, idioms, figurative language, and inflated phrasing when "
+    "ordinary English is more precise.\n"
+    "\n"
     "SUMMARY:\n"
     "- Use ONLY facts present in the supplied text. Introduce nothing.\n"
-    "- Substantially shorter than the source — a fraction of it, not a trim.\n"
-    "- Plain prose. No preamble, no code fences, no headers.\n"
+    "- Make the summary substantially shorter than the source.\n"
+    "- Use plain prose with no preamble, code fences, or headings.\n"
     "\n"
     "OPEN ITEMS:\n"
     "An open item is a point where the reader's input changes what happens "
@@ -181,7 +195,7 @@ def summarize(window_text):
     try:
         result = subprocess.run(
             [
-                "claude", "-p", SUMMARIZER_PROMPT,
+                "/Users/amitzohar/.local/bin/claude", "-p", SUMMARIZER_PROMPT,
                 "--model", "haiku",
                 "--settings", '{"disableAllHooks":true}',
                 "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -231,7 +245,8 @@ def save_marker(session_id, marker):
 
 def main():
     if os.environ.get("CONCISE_SUMMARIZER") == "1":
-        return  # we are the headless child (belt; --bare is the suspenders)
+        return  # headless child: CONCISE_SUMMARIZER=1 (belt) plus the child's
+                # own --settings '{"disableAllHooks":true}' (suspenders)
 
     # Debug/test mode: print the filtered window and exit. No model call.
     if len(sys.argv) >= 3 and sys.argv[1] == "--extract-window":
