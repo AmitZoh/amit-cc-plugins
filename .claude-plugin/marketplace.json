@@ -9,6 +9,11 @@
       "name": "concise-prose",
       "source": "./concise-prose",
       "description": "Reshapes Claude Code output for fast human reading: conclusion first, only reasoning that carries information, and an enforced standalone SUMMARY (plus OPEN ITEMS when needed) at the end of every response via a Stop hook."
+    },
+    {
+      "name": "agent-sandbox-provision",
+      "source": "./agent-sandbox-provision",
+      "description": "Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done."
     }
   ]
 }
