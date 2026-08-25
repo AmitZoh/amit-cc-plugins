@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claude-ro.local/schemas/state-v1.json",
+  "title": "agent-sandbox-provision state.json",
+  "description": "Authoritative shape for state.json. Skills 1, 2, and 3 all read this file; field names pinned here so skills can't drift.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "user", "macos_user", "default_account_id", "accounts"],
+  "allOf": [
+    {
+      "if": { "properties": { "schema_version": { "const": 2 } }, "required": ["schema_version"] },
+      "then": { "required": ["github", "mongodb"] }
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "Accepts 1 or 2 so a v1 file validates before it is migrated in memory to 2. Code hard-fails anything > 2 (skill too old). The github[]/mongodb[] arrays are required only at version 2 (see the top-level allOf)."
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["username"],
+      "properties": {
+        "username": {
+          "type": "string",
+          "description": "whoami of the user at init time. Used in sudoers, ACL, paths."
+        }
+      }
+    },
+    "macos_user": {
+      "type": "string",
+      "const": "claude-ro",
+      "description": "Hardcoded for v1. Future-proofing: leaving it in state.json so a future migration can rename without breaking older skill installs."
+    },
+    "default_account_id": {
+      "type": "string",
+      "pattern": "^([0-9]{12})?$",
+      "description": "Account the launcher uses when neither --account nor CLAUDE_RO_ACCOUNT is set. Must be present in accounts[] once set. Empty string is valid before the first provision_account (and for GitHub/Mongo-only setups)."
+    },
+    "accounts": {
+      "type": "array",
+      "description": "One entry per AWS account the user has bound. Each holds its own RO role and clusters[]. Empty before the first provision_account (and for GitHub/Mongo-only setups).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "ro_role_name",
+          "ro_role_arn",
+          "default_region",
+          "assumer_profile",
+          "trust_principal_arn",
+          "trust_principal_kind",
+          "clusters",
+          "verify_fixtures"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$"
+          },
+          "ro_role_name": {
+            "type": "string",
+            "pattern": "^claude-ro-[0-9a-f]{8}$",
+            "description": "Generated at provision time as claude-ro-<short_uuid> (8 hex). Avoids collision with any pre-existing claude-ro role."
+          },
+          "ro_role_arn": {
+            "type": "string",
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/claude-ro-[0-9a-f]{8}$"
+          },
+          "default_region": {
+            "type": "string",
+            "examples": ["us-east-1", "eu-west-1"]
+          },
+          "assumer_profile": {
+            "type": "string",
+            "description": "Name of the user's AWS CLI profile that has working creds in this account. Required --aws-profile flag on provision-account; reused from this record by deprovision-account / bind-cluster / unbind-cluster."
+          },
+          "trust_principal_arn": {
+            "type": "string",
+            "pattern": "^arn:aws:iam::[0-9]{12}:user/.+$",
+            "description": "Captured from `aws sts get-caller-identity` at provision time. v1 supports IAM-user principals only."
+          },
+          "trust_principal_kind": {
+            "type": "string",
+            "const": "iam_user",
+            "description": "v1 supports only iam_user. Phase 2 may add sso_role / federated."
+          },
+          "clusters": {
+            "type": "array",
+            "description": "Bound k8s clusters within this account. Empty until bind-cluster is run for the first cluster.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "cluster_name",
+                "region",
+                "endpoint",
+                "ca_data",
+                "access_entry_principal_arn",
+                "supplemental_cluster_role"
+              ],
+              "properties": {
+                "cluster_name": { "type": "string" },
+                "region": { "type": "string" },
+                "endpoint": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "ca_data": {
+                  "type": "string",
+                  "description": "Base64-encoded PEM. Embedded into per-launch kubeconfig."
+                },
+                "access_entry_principal_arn": {
+                  "type": "string",
+                  "description": "Should equal accounts[].ro_role_arn — recorded for audit."
+                },
+                "supplemental_cluster_role": {
+                  "type": "string",
+                  "pattern": "^claude-ro-crd-read-.+$",
+                  "description": "Name of the per-cluster ClusterRole that grants get/list/watch on enumerated CRDs. Aggregated to view."
+                }
+              }
+            }
+          },
+          "s3_decrypt_grants": {
+            "type": "array",
+            "description": "Per-bucket holes punched in the guardrails' kms:Decrypt deny by grant-s3-decrypt. Each entry both narrows the DenyKmsDecrypt statement (a negated condition on the S3 encryption context) and adds its own scoped Allow — ReadOnlyAccess carries no kms:Decrypt, so narrowing the deny alone grants nothing. Empty/absent means kms:Decrypt is denied outright, the v1 behavior.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bucket", "prefix", "region", "kms_key_arn", "bucket_key_enabled", "encryption_context", "context_match", "granted_at"],
+              "properties": {
+                "bucket": {"type": "string"},
+                "prefix": {
+                  "type": ["string", "null"],
+                  "description": "Object-key prefix, or null for bucket-wide. Only expressible when bucket_key_enabled is false: with bucket keys on, S3 puts the BUCKET arn in the encryption context, so there is nothing sub-bucket to match."
+                },
+                "region": {"type": "string", "description": "The bucket's region. Pins kms:ViaService on the Allow."},
+                "kms_key_arn": {
+                  "type": "string",
+                  "pattern": "^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/.+$",
+                  "description": "Resolved key ARN. Alias ARNs are not valid in an IAM Resource, so alias/aws/s3 is resolved through kms:DescribeKey at grant time."
+                },
+                "kms_key_alias": {"type": ["string", "null"]},
+                "bucket_key_enabled": {"type": "boolean", "description": "Read from the bucket's default encryption at grant time. Decides whether the encryption context is the bucket ARN or the object ARN."},
+                "encryption_context": {"type": "string", "description": "The aws:s3:arn value this grant matches: a bucket ARN (context_match=equals) or an object-ARN pattern ending in * (context_match=like)."},
+                "context_match": {"type": "string", "enum": ["equals", "like"]},
+                "granted_at": {"type": "string", "format": "date-time"}
+              }
+            }
+          },
+          "verify_fixtures": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Deterministic identifiers for shared verification fixtures inside this account / its clusters. Names are derived from account_id (where the namespace is global, e.g. S3 bucket / KMS alias) or fixed (where it's account-scoped). Created by ensure_verify_fixtures(account_id, region) which is idempotent: provider 'already exists' errors (BucketAlreadyOwnedByYou, ResourceExistsException, etc.) are treated as success. Fixtures are ORG-SHARED — many engineers in one account reuse the same set. deprovision-account does NOT delete them; use `sandbox-revoke purge-org-fixtures <account_id> --confirm` when no engineer in the org is using the account anymore. This object is therefore a deterministic cache: the names are stable for the lifetime of the account binding, even across re-provisions.",
+            "properties": {
+              "verify_bucket": {
+                "type": "string",
+                "description": "S3 bucket name. Format: claude-ro-verify-<account_id> (S3 namespace is global, must include account ID)."
+              },
+              "verify_secret_id": {
+                "type": "string",
+                "description": "Secrets Manager secret name. Format: claude-ro-verify-deny (account-scoped)."
+              },
+              "verify_table": {
+                "type": "string",
+                "description": "DynamoDB table name. Format: claude-ro-verify-deny (account-scoped)."
+              },
+              "verify_log_group": {
+                "type": "string",
+                "description": "CloudWatch Logs group. Format: /aws/claude-ro-verify-deny (account-scoped)."
+              },
+              "verify_kms_key_id": {
+                "type": "string",
+                "description": "KMS key ID. The aliased name `alias/claude-ro-verify` is account-scoped; the underlying KeyId is recorded here for the verify call."
+              },
+              "verify_glacier_key": {
+                "type": "string",
+                "description": "S3 object key inside verify_bucket whose storage-class is GLACIER, used for the s3:RestoreObject deny check. Account-scoped within the bucket."
+              },
+              "verify_pods": {
+                "type": "object",
+                "description": "Map cluster_name -> pod name in default namespace. Format: claude-ro-verify-deny (cluster-scoped).",
+                "additionalProperties": { "type": "string" }
+              },
+              "verify_crd_kind": {
+                "type": "object",
+                "description": "Map cluster_name -> one CRD kind sampled at provision time. Used by verify to confirm the supplemental ClusterRole landed.",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "github": {
+      "type": "array",
+      "description": "One entry per org the user has bound: a read-only GitHub App OWNED BY that org and installed on it (private — owner == install target). ALL bound orgs are reachable at once in claude-ro via the shared claude-ro-mint-github broker (no per-launch selection). Added at schema v2.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["login", "account_type", "app_id", "app_slug", "installation_id", "secret_ref", "granted_at"],
+        "properties": {
+          "login": { "type": "string", "description": "The org/user login this App is owned by + installed on; also the runtime/github/<login>.token filename." },
+          "account_type": { "type": "string", "enum": ["org", "user"], "description": "Whether `login` is an organization or a personal user account (routes the App create page + delete URL)." },
+          "app_id": { "type": "string", "pattern": "^[0-9]+$", "description": "GitHub App id (JWT iss)." },
+          "app_slug": { "type": "string", "description": "Globally-unique app slug." },
+          "installation_id": { "type": "string", "pattern": "^[0-9]+$", "description": "The App's installation on its org." },
+          "secret_ref": { "type": "string", "description": "Filename (not path) of the mode-600 App private-key PEM under the secrets dir. Never the key itself." },
+          "granted_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "mongodb": {
+      "type": "array",
+      "description": "Top-level MongoDB deployments the user has bound (independent of accounts[]). ALL bound DBs are reachable at once in claude-ro via the shared claude-ro-mint-mongodb broker (no per-launch selection). The read-only DB user is created by the DB owner out of band; only its password is stored (in the secret file). Added at schema v2.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name", "kind", "srv", "default_db", "granted_at"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$",
+            "description": "Identifier for this DB; also the MONGODB_URI_<NAME> env-var suffix (upper-cased, -/. → _). Same charset restriction as github[].name."
+          },
+          "kind": { "type": "string", "enum": ["atlas", "self_hosted"], "description": "Only picks the URI form (srv host vs host list) and verify reachability expectations." },
+          "auth": { "type": "string", "enum": ["password", "aws_iam"], "description": "Authentication method. Absent/`password` (default): a stored RO-user password (username + secret_ref). `aws_iam` (Atlas only): the DB user is claude-ro's per-account RO role (iam_role_arn) and connections use MONGODB-AWS with claude-ro's minted RO creds — no password, no stored secret." },
+          "aws_account_id": { "type": "string", "pattern": "^[0-9]{12}$", "description": "aws_iam only: which provisioned account's RO role authenticates to this Atlas DB (its minted creds are used at connect time)." },
+          "iam_role_arn": { "type": "string", "description": "aws_iam only: the RO role ARN registered as the Atlas DB user (accounts[].ro_role_arn for aws_account_id, captured at bind time so a re-provision churn is visible)." },
+          "srv": { "type": "boolean", "description": "true → mongodb+srv:// using srv_host; false → mongodb:// using hosts." },
+          "srv_host": { "type": "string", "description": "Present when srv is true, e.g. prod-0.ab12.mongodb.net." },
+          "hosts": { "type": "string", "description": "Present when srv is false, e.g. n1:27017,n2:27017." },
+          "username": { "type": "string", "description": "password auth: the read-only DB user, e.g. claude-ro-<engineer>. Absent for aws_iam." },
+          "auth_db": { "type": "string" },
+          "default_db": { "type": "string" },
+          "options": { "type": "string", "description": "Extra connection-string query params, e.g. tls=true&readPreference=secondaryPreferred." },
+          "via_cluster": { "type": "string", "description": "Optional: kubectl context (in the ENGINEER's kubeconfig) of a cluster with network line-of-sight to this DB. When set, claude-ro stands up a per-session SOCKS5 proxy on demand via the engineer-run claude-ro-tunnel-<cluster> broker; the tunnel's local port is chosen per session at run time (NOT stored here) and the agent passes it to the Mongo minter, which bakes proxyHost/proxyPort into the URI. Engineer-side only — claude-ro's RO role never touches the cluster." },
+          "secret_ref": { "type": "string", "description": "password auth only (absent for aws_iam): filename (not path) of the mode-600 file holding the RO user's password." },
+          "granted_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "snowflake": {
+      "type": "array",
+      "description": "Top-level Snowflake accounts the user has bound (independent of accounts[]). ALL bound Snowflake identities are reachable at once in claude-ro via the shared claude-ro-mint-snowflake broker (no per-launch selection). Auth is RSA key-pair: the durable private key PEM lives mode-600 under the secrets dir and the broker signs a short-lived JWT with it, so no long-lived credential ever enters the sandbox. The read-only service user + role are created by the Snowflake account admin out of band; only the private key is stored.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name", "account", "service_user", "qualified_username", "public_key_fp", "role", "secret_ref", "granted_at"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$",
+            "description": "Identifier for this Snowflake binding; also the SNOWFLAKE_*_<NAME> env-var suffix (upper-cased, -/. → _). Same charset restriction as mongodb[].name."
+          },
+          "account": {
+            "type": "string",
+            "description": "The ORG-QUALIFIED account identifier as it appears in the Snowsight URL (e.g. kpsovyc-ta51714) — this is what routes to the account's endpoint. Deliberately NOT what CURRENT_ACCOUNT() returns: that is the account LOCATOR, which does not route, and pasting it here yields a connection that never resolves."
+          },
+          "service_user": {
+            "type": "string",
+            "description": "The read-only Snowflake service user the key is registered on (e.g. CLAUDE_RO_<ENGINEER>), created out of band by the account admin. Stored unqualified for display and for the admin-side ALTER USER statements."
+          },
+          "qualified_username": {
+            "type": "string",
+            "description": "<ACCOUNT>.<SERVICE_USER>, upper-cased, computed at bind time. Used verbatim as the JWT `sub` (and as the `iss` prefix). Recorded rather than re-derived per mint so a wrong account/user pairing surfaces once, at bind, instead of as an opaque JWT rejection every hour inside the broker."
+          },
+          "public_key_fp": {
+            "type": "string",
+            "description": "SHA256:… fingerprint of the registered public key, read back from DESCRIBE USER at bind time. Forms the JWT `iss` (<qualified_username>.<fp>). Pinned here for the same reason as qualified_username: a key that was never registered, or was rotated out from under us, fails loudly at bind rather than silently every hour in the broker."
+          },
+          "role": {
+            "type": "string",
+            "description": "The read-only role the broker requests at connect time (e.g. READ_ALL). The grant itself lives in Snowflake; this only selects which of the user's granted roles is activated, so a broadened grant cannot silently widen the session."
+          },
+          "warehouse": {
+            "type": "string",
+            "description": "Optional: default warehouse for the session (e.g. COMPUTE_WH). Absent means the user's own DEFAULT_WAREHOUSE applies; queries fail with 'no warehouse selected' if neither is set."
+          },
+          "database": {
+            "type": "string",
+            "description": "Optional: default database for the session. Purely a convenience for unqualified queries — it grants nothing the role does not already have."
+          },
+          "secret_ref": {
+            "type": "string",
+            "description": "Filename (not path) of the mode-600 RSA private-key PEM under the secrets dir. Never the key itself, and never a path — the secrets dir is resolved by the broker so state.json cannot be edited to point the reader at an arbitrary file."
+          },
+          "granted_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "lockdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Filename-only Tier 2 classifier state. Filename + path are the only signals; no content is read or sent. Verdicts are 'sensitive' or 'not_sensitive' only — fail-safe coercion in apply ensures any malformed verdict becomes 'sensitive'.",
+      "properties": {
+        "classifier_cache": {
+          "type": "object",
+          "description": "Map absolute path -> verdict. Filename-only classification is a pure function of the path; mtime/size are deliberately not part of the key (a `touch` should not invalidate the verdict).",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["sensitive", "not_sensitive"]
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "array",
+      "description": "Reserved for the Phase 2 extension flow. Always empty in v1; Skill 3 must read the schema correctly so v2 doesn't break teardown.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "policy_arn", "granted_at", "granted_by"],
+        "properties": {
+          "name": { "type": "string" },
+          "policy_arn": { "type": "string" },
+          "granted_at": { "type": "string", "format": "date-time" },
+          "granted_by": { "type": "string" },
+          "expires_at": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "pending_operation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Set by the orchestrator at the start of a mutating sub-command, cleared after the final state_commit + verify pass. Drives partial-failure resume.",
+      "required": ["kind", "target", "last_completed_phase", "started_at"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["init", "provision-account", "bind-cluster", "unbind-cluster", "deprovision-account", "bind-github", "unbind-github", "bind-mongodb", "unbind-mongodb", "bind-snowflake", "unbind-snowflake", "grant-s3-decrypt", "revoke-s3-decrypt"]
+        },
+        "target": {
+          "type": "object",
+          "description": "Op-specific target; e.g. {account_id, cluster_name} for bind-cluster."
+        },
+        "last_completed_phase": {
+          "type": ["string", "null"],
+          "description": "null right after begin_operation (no phase completed yet), then the name of the last completed phase.",
+          "enum": [
+            null,
+            "local_user",
+            "local_acl",
+            "local_sudoers",
+            "local_launcher",
+            "local_kube_dir",
+            "local_binaries",
+            "local_launchd",
+            "aws_role",
+            "aws_role_policies",
+            "aws_eks_access_entry",
+            "aws_eks_access_policy",
+            "k8s_supplemental_role",
+            "verify_fixtures",
+            "state_commit",
+            "lockdown_sweep",
+            "verify",
+            "awaiting_db_user",
+            "secret_stored",
+            "broker_installed",
+            "provider_verified",
+            "app_committed",
+            "wiring_installed"
+          ]
+        },
+        "started_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

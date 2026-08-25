@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily lockdown sweep. Ships as a LaunchAgent (per-user) rather than a
+  LaunchDaemon (system-wide) because:
+    1. CC's auth lives in the user's home (~/.claude/...) and CC
+       can't see it as root.
+    2. The sweep operates over the user's $HOME, owned by the user.
+
+  Runs `claude -p` with permission-mode set to auto so the agent doesn't
+  hit the permission gate (no human present at 03:00 to answer prompts).
+  The prompt explicitly scopes mutations to whatever lockdown.py performs;
+  the agent should not write to other paths, delete files, or take any
+  other mutating action. Auto mode's safety classifier still applies.
+
+  Failure surfacing: a thin /bin/sh wrapper timestamps the start and end
+  of every run and logs the exit code. Empty log entries for a scheduled
+  day mean launchd never started the job; non-zero rc on the end line
+  means claude itself failed (auth, classifier 3-strike block, etc.).
+  Tail $HOME/Library/Logs/claude-ro-lockdown.log to monitor.
+
+  If `claude -p` proves unreliable from launchd in practice, fall back to:
+    `python3 .../lockdown.py scan` -> orchestrator runs out-of-band -> apply.
+  Or run lockdown manually before any sensitive Claude Code session.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude-ro.lockdown</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>{
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] lockdown sweep starting"
+  /usr/local/bin/claude -p --permission-mode auto 'Run python3 {{SKILL_SCRIPTS_DIR}}/lockdown.py scan, classify each Tier 2 candidate as sensitive or not_sensitive based on filename + path using subagents in batches of 8, then pipe verdicts to python3 {{SKILL_SCRIPTS_DIR}}/lockdown.py apply. The only mutations you should perform are those done by lockdown.py scan and apply themselves (chmod 600 on classified files); do not write to other paths, delete files, or perform any other mutating action.'
+  rc=$?
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] lockdown sweep finished rc=$rc"
+  exit $rc
+}</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{HOME}}</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <key>USER</key>
+        <string>{{USERNAME}}</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>{{HOUR}}</integer>
+        <key>Minute</key>
+        <integer>{{MINUTE}}</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>{{HOME}}/Library/Logs/claude-ro-lockdown.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{HOME}}/Library/Logs/claude-ro-lockdown.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

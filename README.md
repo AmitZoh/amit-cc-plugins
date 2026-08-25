@@ -14,6 +14,7 @@ A personal [Claude Code](https://code.claude.com) plugin marketplace.
 | Plugin | What it does |
 | --- | --- |
 | [`concise-prose`](./concise-prose) | Reshapes output for fast human reading and enforces a standalone end-of-turn SUMMARY via a Stop hook. |
+| [`agent-sandbox-provision`](./agent-sandbox-provision) | Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done. |
 
 ## Layout convention
 
@@ -23,3 +24,5 @@ A personal [Claude Code](https://code.claude.com) plugin marketplace.
 ## Contributing
 
 The repo is public but only the owner has write access. Open a pull request for any change.
+
+Every push to this repo's public `origin` must be squashed to a single commit — work happens on a private staging remote first (see repo owner for details) and only lands here once it's ready.
