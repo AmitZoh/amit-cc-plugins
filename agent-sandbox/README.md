@@ -42,6 +42,18 @@ Scripts locate their own code via `Path(__file__)`, and slash-command instructio
 
 `claude-ro` discovers skills only through `~/.claude/skills`, never through your plugins directory, so `cred-sweep` — the one skill meant to run *inside* the sandbox — is linked there for you by `init` and re-linked by `refresh-settings`. It consequently appears as a personal skill named `cred-sweep` rather than `/agent-sandbox:cred-sweep`. `provision` and `revoke` are deliberately left out of `claude-ro`'s reach.
 
+## Use it
+
+After `init`, start Claude in the sandbox by running the launcher instead of `claude`:
+
+```
+claude-ro
+```
+
+That is the whole point of the plugin: `claude-ro` starts Claude as the limited macOS user, holding a read-only cloud identity, so it can read your accounts but cannot change or delete anything. `claude` still starts your own unrestricted session.
+
+The launcher takes optional flags — `claude-ro [--account ID] [--profile NAME] [--region NAME] [--context NAME] [-- claude args...]` — to pick which bound AWS account and cluster context the session gets. GitHub, MongoDB and Snowflake need no flags; every bound one is reachable in the session. See `skills/provision/SKILL.md` for the details.
+
 ## Where installed files point
 
 `init` creates `/usr/local/claude-ro-skills`, a root-owned symlink to the plugin's `skills/` directory. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through it, so none of them stores a real path, and `~/.claude/skills/cred-sweep` is linked through it too rather than at the version-numbered plugin cache. One link moves on an update; nothing else has to.

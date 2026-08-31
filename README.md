@@ -17,7 +17,7 @@ Add the marketplace once, then install whichever plugins you want from it:
 | Plugin | What it does | What you type |
 | --- | --- | --- |
 | [`concise-prose`](./concise-prose) | Reshapes output for fast human reading and enforces a standalone end-of-turn SUMMARY via a Stop hook. | nothing — it works through hooks |
-| [`agent-sandbox`](./agent-sandbox) | Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done. | `/agent-sandbox:provision`, `/agent-sandbox:cred-sweep` |
+| [`agent-sandbox`](./agent-sandbox) | Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done. | `/agent-sandbox:provision` to set it up, then `claude-ro` to launch a sandboxed session |
 
 ## Layout convention
 
