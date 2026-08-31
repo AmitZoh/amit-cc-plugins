@@ -59,6 +59,7 @@ def _rerender_machine(username: str, ctx: common.Ctx) -> None:
     # personal-skill and a plugin install, this is the single update that makes
     # every already-installed broker and the lockdown plist resolve again.
     common.ensure_skill_symlink(ctx=ctx)
+    common.ensure_cred_sweep_discoverable(ctx=ctx)
     common.ensure_secrets_dir(ctx=ctx)
     common.ensure_runtime_dir(ctx=ctx)
     init.phase_local_sudoers(username, ctx=ctx)

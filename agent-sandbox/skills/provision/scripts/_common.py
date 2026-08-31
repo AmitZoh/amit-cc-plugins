@@ -1255,8 +1255,16 @@ RUNTIME_DIR = pathlib.Path("/usr/local/claude-ro-runtime")
 # Safe to dereference from a root-run helper: /usr/local is root:wheel 0755, so
 # the link itself is not user-writable. Its TARGET is user-owned, but that is
 # exactly what the absolute path pointed at before — no boundary changes.
-SKILL_LINK = pathlib.Path("/usr/local/claude-ro-skill")
-SKILL_SCRIPTS_LINK = SKILL_LINK / "scripts"
+SKILLS_LINK = pathlib.Path("/usr/local/claude-ro-skills")
+SKILL_SCRIPTS_LINK = SKILLS_LINK / SKILL_DIR.name / "scripts"
+CRED_SWEEP_LINK_TARGET = SKILLS_LINK / "cred-sweep"
+
+# claude-ro discovers skills ONLY through ~/.claude/skills (its own ~/.claude/skills
+# is a symlink to the real user's). cred-sweep is meant to run inside the sandbox,
+# so it has to appear there — and it must reach the plugin through SKILLS_LINK, not
+# through the version-numbered plugin cache path, or it breaks on the next update.
+CRED_SWEEP_USER_LINK = pathlib.Path(
+    os.path.expanduser("~/.claude/skills/cred-sweep"))
 # aws writes two files per account here: <account_id>.credentials and
 # <account_id>.kubeconfig (the per-account minter's output). tunnel holds one
 # <cluster-label>.pid per active SOCKS port-forward, so the launcher can kill it on
@@ -1368,20 +1376,54 @@ def ensure_secrets_dir(*, ctx: Ctx | None = None) -> None:
 
 
 def ensure_skill_symlink(*, ctx: Ctx | None = None) -> None:
-    """Point SKILL_LINK at this skill's real directory, root-owned. Idempotent —
+    """Point SKILLS_LINK at the plugin's skills/ directory, root-owned. Idempotent —
     re-running repoints an existing link rather than failing, which is what makes
     it the repair path after a rename, a version bump, or a move between a
     personal-skill and a plugin install. Requires an active admin_session.
 
+    It targets the skills/ PARENT rather than this one skill so a single link
+    serves every skill in the plugin — the brokers reach provision/scripts through
+    it, and cred-sweep is reachable beside them.
+
     Must run BEFORE anything that renders SKILL_SCRIPTS_LINK into an installed
     file, otherwise those files reference a link that does not exist yet."""
+    skills_dir = SKILL_DIR.parent
     if ctx is not None and ctx.dry_run:
-        log.info("[dry-run] would symlink %s → %s", SKILL_LINK, SKILL_DIR)
+        log.info("[dry-run] would symlink %s → %s", SKILLS_LINK, skills_dir)
         return
     # -n so an existing symlink-to-dir is replaced rather than followed (which
     # would drop the new link INSIDE the old target). -f to replace atomically.
-    admin_run_a(["ln", "-sfn", str(SKILL_DIR), str(SKILL_LINK)])
-    log.info("symlinked %s → %s", SKILL_LINK, SKILL_DIR)
+    admin_run_a(["ln", "-sfn", str(skills_dir), str(SKILLS_LINK)])
+    log.info("symlinked %s → %s", SKILLS_LINK, skills_dir)
+
+
+def ensure_cred_sweep_discoverable(*, ctx: Ctx | None = None) -> None:
+    """Make cred-sweep visible to claude-ro by linking it into ~/.claude/skills.
+
+    claude-ro's ~/.claude/skills is a symlink to the real user's, and that is the
+    only place it looks — a plugin install is invisible to it. cred-sweep is the
+    one skill in this plugin meant to run INSIDE the sandbox, so it is the one
+    that has to be linked across; provision and revoke deliberately stay out of
+    claude-ro's reach.
+
+    Points through SKILLS_LINK rather than at the plugin directory, so a version
+    bump moves the one root-owned link and this one keeps resolving. Runs as the
+    invoking user — no escalation, ~/.claude is theirs."""
+    if ctx is not None and ctx.dry_run:
+        log.info("[dry-run] would symlink %s → %s",
+                 CRED_SWEEP_USER_LINK, CRED_SWEEP_LINK_TARGET)
+        return
+    CRED_SWEEP_USER_LINK.parent.mkdir(parents=True, exist_ok=True)
+    if CRED_SWEEP_USER_LINK.is_symlink() or CRED_SWEEP_USER_LINK.exists():
+        # A real directory here is someone's own copy — refuse rather than delete it.
+        if not CRED_SWEEP_USER_LINK.is_symlink():
+            log.warning("%s exists and is not a symlink — leaving it alone; "
+                        "cred-sweep in the sandbox may be a stale copy",
+                        CRED_SWEEP_USER_LINK)
+            return
+        CRED_SWEEP_USER_LINK.unlink()
+    CRED_SWEEP_USER_LINK.symlink_to(CRED_SWEEP_LINK_TARGET)
+    log.info("symlinked %s → %s", CRED_SWEEP_USER_LINK, CRED_SWEEP_LINK_TARGET)
 
 
 def ensure_runtime_dir(*, ctx: Ctx | None = None) -> None:

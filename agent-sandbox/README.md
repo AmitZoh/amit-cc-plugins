@@ -40,17 +40,13 @@ macOS only, and `init` needs admin rights on the machine.
 
 Scripts locate their own code via `Path(__file__)`, and slash-command instructions reference `${CLAUDE_PLUGIN_ROOT}` — there's no fixed literal path to type. All three skills install together; `cred-sweep` cross-imports `provision`'s `_common.py` and AWS provider as a sibling under this plugin's `skills/` directory.
 
-Note for the sandbox itself: `claude-ro` discovers skills only through `~/.claude/skills`, not through your plugins directory. If you want `cred-sweep` available *inside* the sandbox, symlink it there:
-
-```
-ln -s ~/.claude/plugins/cache/<marketplace>/agent-sandbox/<version>/skills/cred-sweep ~/.claude/skills/cred-sweep
-```
-
-It then appears as a personal skill named `cred-sweep` rather than `/agent-sandbox:cred-sweep`.
+`claude-ro` discovers skills only through `~/.claude/skills`, never through your plugins directory, so `cred-sweep` — the one skill meant to run *inside* the sandbox — is linked there for you by `init` and re-linked by `refresh-settings`. It consequently appears as a personal skill named `cred-sweep` rather than `/agent-sandbox:cred-sweep`. `provision` and `revoke` are deliberately left out of `claude-ro`'s reach.
 
 ## Where installed files point
 
-`init` creates `/usr/local/claude-ro-skill`, a root-owned symlink to whichever copy of this skill is in use. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through that link, so none of them stores the skill's real path. After updating the plugin — or moving between a local clone and an installed copy — run `/agent-sandbox:provision refresh-settings` to repoint the link and re-render everything that uses it.
+`init` creates `/usr/local/claude-ro-skills`, a root-owned symlink to the plugin's `skills/` directory. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through it, so none of them stores a real path, and `~/.claude/skills/cred-sweep` is linked through it too rather than at the version-numbered plugin cache. One link moves on an update; nothing else has to.
+
+After updating the plugin — or moving between a local clone and an installed copy — run `/agent-sandbox:provision refresh-settings` to repoint it and re-render everything that uses it.
 
 ## State
 

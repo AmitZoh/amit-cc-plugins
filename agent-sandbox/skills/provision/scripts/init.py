@@ -196,11 +196,12 @@ def phase_local_kube_dir(*, ctx: common.Ctx) -> None:
 
 
 def phase_local_stable_skill_link_actions(*, ctx: common.Ctx) -> list[str]:
-    return [f"create symlink {common.SKILL_LINK} → {common.SKILL_DIR}"]
+    return [f"create symlink {common.SKILLS_LINK} → {common.SKILL_DIR.parent}"]
 
 
 def phase_local_stable_skill_link(*, ctx: common.Ctx) -> None:
-    """Point the stable /usr/local/claude-ro-skill link at this skill directory.
+    """Point the stable /usr/local/claude-ro-skills link at the plugin's skills dir,
+    and link cred-sweep into ~/.claude/skills so the sandbox user can see it.
 
     Distinct from phase_local_skill_symlink below, which makes the user's skills
     dir discoverable from claude-ro's HOME. This one exists so that no installed
@@ -208,6 +209,7 @@ def phase_local_stable_skill_link(*, ctx: common.Ctx) -> None:
     the lockdown plist all reach the code through this link. Must run before
     phase_local_launchd and before any bind-* renders a broker."""
     common.ensure_skill_symlink(ctx=ctx)
+    common.ensure_cred_sweep_discoverable(ctx=ctx)
 
 
 def phase_local_skill_symlink_actions(username: str, *, ctx: common.Ctx) -> list[str]:
@@ -479,7 +481,8 @@ def main() -> None:
             "  - Create macOS user 'claude-ro' (no password, non-admin)\n"
             f"  - Allow-ACL on /Users/{username} for claude-ro\n"
             f"  - Install /etc/sudoers.d/claude-ro\n"
-            f"  - Symlink {common.SKILL_LINK} at this skill (stable path for brokers)\n"
+            f"  - Symlink {common.SKILLS_LINK} at the plugin's skills (stable path for "
+            f"brokers), and link cred-sweep into ~/.claude/skills for the sandbox\n"
             "  - Symlink claude/aws/kubectl into /usr/local/bin (if missing)\n"
             "  - Provision an empty-password login keychain for claude-ro (CC token storage)\n"
             "  - Install ~/Library/LaunchAgents/com.claude-ro.lockdown.plist\n"
