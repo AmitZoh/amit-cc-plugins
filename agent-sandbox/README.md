@@ -2,9 +2,15 @@
 
 A Claude Code plugin bundling three skills that give an agent a read-only cloud sandbox instead of your real credentials.
 
-- **`agent-sandbox`** — provisions the sandbox: a non-admin macOS user (`claude-ro`), a per-user AWS IAM role (ReadOnlyAccess + targeted denies), read-only Kubernetes access entries, and credential-broker access to GitHub, MongoDB and Snowflake. Every credential is minted by a pinned, argument-less broker that writes it straight to a file — never to stdout, never through the model.
-- **`cred-sweep`** — runs *inside* the sandbox and audits it: hunts for plaintext credentials reachable from the read-only identity across S3, Lambda, CloudFormation, EC2 user-data, ECS, CodeBuild and SSM Parameter Store, and pivots any it finds into an escalation-chain narrative. Reports locations only, never values.
-- **`revoke`** — deletes the sandbox (full teardown or single-account). Delete-only, no disable. *Not yet implemented.*
+- **`provision`** (`/agent-sandbox:provision`) — provisions the sandbox: a non-admin macOS user (`claude-ro`), a per-user AWS IAM role (ReadOnlyAccess + targeted denies), read-only Kubernetes access entries, and credential-broker access to GitHub, MongoDB and Snowflake. Every credential is minted by a pinned, argument-less broker that writes it straight to a file — never to stdout, never through the model.
+- **`cred-sweep`** (`/agent-sandbox:cred-sweep`) — runs *inside* the sandbox and audits it: hunts for plaintext credentials reachable from the read-only identity across S3, Lambda, CloudFormation, EC2 user-data, ECS, CodeBuild and SSM Parameter Store, and pivots any it finds into an escalation-chain narrative. Reports locations only, never values.
+- **`revoke`** — deletes the sandbox (full teardown or single-account). Delete-only, no disable. Not user-invocable, so it has no slash command; Claude reaches for it when you ask to tear the sandbox down. *Not yet implemented.*
+
+Start with `/agent-sandbox:provision init`, then `/agent-sandbox:provision provision-account` for each cloud account.
+
+## Hooks
+
+This plugin registers a `PreToolUse` / `PostToolUse` pair on `Edit` (see `hooks/hooks.json`). They record a file's permissions before an edit and restore them after, because `Edit` replaces the file at mode `0600` and would otherwise strip the read access `claude-ro` depends on. They are declared by the plugin, so nothing writes paths into your `settings.json`; installing the plugin is all that is needed.
 
 ## Threat model
 
@@ -12,7 +18,12 @@ A reasoning agent that decides on a destructive action it considers reasonable �
 
 ## Install
 
-From a local clone (fastest for iterating):
+```
+/plugin marketplace add AmitZoh/amit-cc-plugins
+/plugin install agent-sandbox@amit-cc-plugins
+```
+
+From a local clone instead, when iterating on the plugin itself:
 
 ```
 /plugin marketplace add /path/to/this/repo
@@ -25,14 +36,21 @@ Or test in a single session without installing:
 claude --plugin-dir /path/to/this/repo/agent-sandbox
 ```
 
-For team distribution, push this repo to GitHub and teammates run:
+macOS only, and `init` needs admin rights on the machine.
+
+Scripts locate their own code via `Path(__file__)`, and slash-command instructions reference `${CLAUDE_PLUGIN_ROOT}` — there's no fixed literal path to type. All three skills install together; `cred-sweep` cross-imports `provision`'s `_common.py` and AWS provider as a sibling under this plugin's `skills/` directory.
+
+Note for the sandbox itself: `claude-ro` discovers skills only through `~/.claude/skills`, not through your plugins directory. If you want `cred-sweep` available *inside* the sandbox, symlink it there:
 
 ```
-/plugin marketplace add your-org/this-repo
-/plugin install agent-sandbox@amit-cc-plugins
+ln -s ~/.claude/plugins/cache/<marketplace>/agent-sandbox/<version>/skills/cred-sweep ~/.claude/skills/cred-sweep
 ```
 
-Scripts locate their own code via `Path(__file__)`, and slash-command instructions reference `${CLAUDE_PLUGIN_ROOT}` — there's no fixed literal path to type. All three skills install together; `cred-sweep` cross-imports `agent-sandbox`'s `_common.py` and AWS provider as a sibling under this plugin's `skills/` directory.
+It then appears as a personal skill named `cred-sweep` rather than `/agent-sandbox:cred-sweep`.
+
+## Where installed files point
+
+`init` creates `/usr/local/claude-ro-skill`, a root-owned symlink to whichever copy of this skill is in use. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through that link, so none of them stores the skill's real path. After updating the plugin — or moving between a local clone and an installed copy — run `/agent-sandbox:provision refresh-settings` to repoint the link and re-render everything that uses it.
 
 ## State
 

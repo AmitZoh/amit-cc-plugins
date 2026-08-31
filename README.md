@@ -4,17 +4,20 @@ A personal [Claude Code](https://code.claude.com) plugin marketplace.
 
 ## Use it
 
+Add the marketplace once, then install whichever plugins you want from it:
+
 ```
 /plugin marketplace add AmitZoh/amit-cc-plugins
 /plugin install concise-prose@amit-cc-plugins
+/plugin install agent-sandbox@amit-cc-plugins
 ```
 
 ## Plugins
 
-| Plugin | What it does |
-| --- | --- |
-| [`concise-prose`](./concise-prose) | Reshapes output for fast human reading and enforces a standalone end-of-turn SUMMARY via a Stop hook. |
-| [`agent-sandbox`](./agent-sandbox) | Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done. |
+| Plugin | What it does | What you type |
+| --- | --- | --- |
+| [`concise-prose`](./concise-prose) | Reshapes output for fast human reading and enforces a standalone end-of-turn SUMMARY via a Stop hook. | nothing — it works through hooks |
+| [`agent-sandbox`](./agent-sandbox) | Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done. | `/agent-sandbox:provision`, `/agent-sandbox:cred-sweep` |
 
 ## Layout convention
 
