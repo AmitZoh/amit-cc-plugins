@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import pathlib
+import pwd
 import re
 import shutil
 import site
@@ -86,7 +87,8 @@ SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 # under SKILL_DIR would be orphaned (and unreadable by the next version) the
 # moment the plugin is updated. mode 0700 because state.json holds AWS account
 # IDs/ARNs/cluster names.
-STATE_DIR = pathlib.Path(os.path.expanduser("~/.claude/plugins/data/agent-sandbox"))
+# Home of the running uid, not $HOME: `sudo -u` keeps the caller's HOME.
+STATE_DIR = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir) / ".claude/plugins/data/agent-sandbox"
 STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 os.chmod(STATE_DIR, 0o700)
 
