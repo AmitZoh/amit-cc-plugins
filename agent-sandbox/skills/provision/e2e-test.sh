@@ -37,8 +37,10 @@ SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPTS="$SKILL_DIR/scripts"
 # state.json/.bak/.lock live outside SKILL_DIR (see _common.py) — a plugin
 # install lives under a version-numbered cache path, so state has to survive
-# a version bump. Must track _common.py's STATE_DIR.
-STATE_DIR="$HOME/.claude/plugins/data/agent-sandbox"
+# a version bump. Must track _common.py's STATE_DIR, which resolves the
+# running account's home from the directory service, not $HOME (sudo -u keeps
+# the caller's HOME).
+STATE_DIR="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory | awk '{print $2}')/.claude/plugins/data/agent-sandbox"
 
 # ----- ui helpers -----
 
