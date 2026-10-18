@@ -14,6 +14,11 @@
       "name": "agent-sandbox",
       "source": "./agent-sandbox",
       "description": "Provisions a read-only AWS+Kubernetes+GitHub+MongoDB+Snowflake sandbox for Claude Code, sweeps it for plaintext credentials reachable from the sandbox identity, and deletes it when done."
+    },
+    {
+      "name": "git-tools",
+      "source": "./git-tools",
+      "description": "Sets up a daily launchd job that auto-commits and pushes a repo, resolves pull conflicts, and surfaces push errors at the next session start."
     }
   ]
 }

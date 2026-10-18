@@ -1,0 +1,15 @@
+{
+  "name": "git-tools",
+  "version": "1.0.0",
+  "description": "Sets up a daily launchd job that auto-commits and pushes a repo, resolves pull conflicts, and surfaces push errors at the next session start.",
+  "author": {
+    "name": "Amit"
+  },
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "commit",
+    "launchd",
+    "backup"
+  ]
+}
