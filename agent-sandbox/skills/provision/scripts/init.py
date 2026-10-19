@@ -37,6 +37,7 @@ import time
 SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_DIR / "scripts"))
 import _common as common  # noqa: E402
+import render_launcher  # noqa: E402
 
 CLAUDE_RO_USER = "claude-ro"
 CLAUDE_RO_HOME = pathlib.Path("/Users") / CLAUDE_RO_USER
@@ -410,6 +411,22 @@ def phase_local_binaries(*, ctx: common.Ctx) -> None:
         common.log.info("symlinked %s -> %s", ulb_path, target)
 
 
+def phase_local_launcher_actions(*, ctx: common.Ctx) -> list[str]:
+    if ctx.dry_run:
+        return []
+    return [f"Write the claude-ro launcher to {render_launcher.LAUNCHER_PATH}"]
+
+
+def phase_local_launcher(*, ctx: common.Ctx) -> None:
+    """Install the claude-ro launcher. It is static and needs no bound account, so
+    init installs it; later sub-commands only re-render it."""
+    if ctx.dry_run:
+        common.log.info("[dry-run] would write launcher %s", render_launcher.LAUNCHER_PATH)
+        return
+    render_launcher.write_launcher(render_launcher.render(common.state_read()))
+    common.log.info("wrote launcher %s", render_launcher.LAUNCHER_PATH)
+
+
 def phase_local_launchd(username: str, *, ctx: common.Ctx) -> None:
     """Render and bootstrap the lockdown launchd plist. Note: invoking `claude -p`
     from launchd is unverified — see the template comment."""
@@ -551,6 +568,9 @@ def main() -> None:
         ("local_binaries",
          lambda: phase_local_binaries(ctx=ctx),
          lambda: phase_local_binaries_actions(ctx=ctx)),
+        ("local_launcher",
+         lambda: phase_local_launcher(ctx=ctx),
+         lambda: phase_local_launcher_actions(ctx=ctx)),
         ("local_launchd",
          lambda: phase_local_launchd(username, ctx=ctx),
          lambda: []),

@@ -31,7 +31,7 @@ v1 implements the **AWS** provider (RO role + EKS access entries). The script CL
 
 | Sub-command | Required flags | When to use |
 | --- | --- | --- |
-| `init` | (none) | One-time machine setup: macOS user, ACL, sudoers, launcher template, launchd plist, binary symlinks, claude-ro login keychain. Provider-agnostic. |
+| `init` | (none) | One-time machine setup: macOS user, ACL, sudoers, launcher (`/usr/local/bin/claude-ro`), launchd plist, binary symlinks, claude-ro login keychain. Provider-agnostic. |
 | `provision-account` | `--provider aws --aws-profile P --aws-account-id ID --aws-region R` | Bind THIS user to a provider account: per-user RO role + ensure org-shared verify fixtures. Run once per engineer per account. |
 | `deprovision-account` | `--provider aws --aws-account-id ID` | Reverse `provision-account`. Deletes the user's per-user RO role and any cluster access entries. Org-shared fixtures stay. |
 | `bind-cluster` | `--provider aws --aws-account-id ID --cluster-name N --aws-region R` | Bind this user's RO role to one k8s cluster on a bound account. Prints full coordinates and confirms before any write. |
