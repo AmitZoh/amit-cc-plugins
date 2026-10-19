@@ -198,7 +198,7 @@ Reporting locations means a leaked secret stays where it already is. Reporting v
 - **Does NOT scan Glue jobs / `ScriptLocation` contents.** Declared coverage gap (org makes minimal use of Glue). Every run that consults `surface_list()` will see Glue listed; the playbook should report it as a known gap, not silently ignore it.
 - **Does NOT read ORC-format S3 Inventory manifests.** Pre-implementation recon found 0 ORC configs in the test account; Parquet and CSV are supported.
 - **Does NOT scan Lambda container-image packages.** Test account is 100% Zip; container-image Lambdas are flagged but not unpacked.
-- **Does NOT defend against an active attacker.** Same scope as Skill 1: the threat is the agent's own reasoning.
+- **Does NOT narrow what a compromised agent can read.** Same scope as Skill 1: an attacker who hijacks the agent inherits `claude-ro`'s read access and nothing more. This skill audits how far that read access reaches; it does not shrink it.
 - **Is non-deterministic by design.** Re-runs may explore different surfaces in different orders. For deterministic auditing, use `scan.py`.
 
 ## Dependencies

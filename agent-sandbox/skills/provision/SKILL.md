@@ -325,7 +325,7 @@ If the agent goes rogue (or you suspect it has):
 
 ## What this skill explicitly does NOT do
 
-- Does NOT defend against an active attacker who's compromised the agent. The agent's IAM identity having no mutation capability is the defense; an attacker with arbitrary code-execution as `claude-ro` can still read everything `claude-ro` can read.
+- **Compromise of the agent does not escalate privileges.** An attacker who hijacks the agent — via prompt injection, a poisoned repo, a hostile MCP server — inherits `claude-ro` and nothing more: no mutation in AWS, no writes outside `claude-ro`'s home. That cap is the guarantee the `ro` in the name encodes. What a compromise does get is `claude-ro`'s full read surface — see the next bullet.
 - Does NOT prevent data exfiltration. The threat model is mutation, not read-out.
 - Does NOT support SSO / federated principals in v1. Provisioning fails clearly when the assumer is an `arn:aws:sts::*:assumed-role/*` ARN.
 - Does NOT track binary symlinks placed at `/usr/local/bin/{claude,aws,kubectl}`. They're left in place on `revoke delete`.
