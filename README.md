@@ -30,4 +30,11 @@ Add the marketplace once, then install whichever plugins you want from it:
 
 The repo is public but only the owner has write access. Open a pull request for any change.
 
-Every push to this repo's public `origin` must be squashed to a single commit — work happens on a private staging remote first (see repo owner for details) and only lands here once it's ready.
+Every change goes through a private staging remote before it reaches this repo's public `origin`. The owner's clone calls that remote `private` (see the repo owner for access).
+
+1. **Stage.** Push the change to `private`. Work-in-progress commits are fine there.
+2. **Test.** The owner tests the staged change.
+3. **Approve.** The owner explicitly approves that change for `origin`.
+4. **Release.** Push the approved change to `origin` as one commit. Squash the change's staging commits into that one commit, but never combine unrelated changes into it. To release several changes, push each commit separately, oldest first.
+
+Nothing reaches `origin` before step 3. An approval to "push" means a push to `private` unless the owner names `origin`.
