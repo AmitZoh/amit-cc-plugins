@@ -274,8 +274,8 @@ def phase_local_keychain_actions(*, ctx: common.Ctx) -> list[str]:
         f"Ensure {CLAUDE_RO_KEYCHAIN.parent} exists (owner {CLAUDE_RO_USER})",
         f"Create empty-password login keychain {CLAUDE_RO_KEYCHAIN} for "
         f"{CLAUDE_RO_USER} (if absent)",
-        f"Set it as {CLAUDE_RO_USER}'s default + login keychain, disable "
-        "auto-lock, and unlock it",
+        f"Set it as {CLAUDE_RO_USER}'s default keychain, check that it is the "
+        "login keychain, disable auto-lock, and unlock it",
     ]
 
 
@@ -288,7 +288,8 @@ def phase_local_keychain(*, ctx: common.Ctx) -> None:
     unlocked — every token write would otherwise pop a Keychain dialog that
     can't be satisfied (claude-ro has no GUI session), and CC re-prompts for
     /login on the next launch. We replace it with a fresh keychain whose
-    password is empty, set it as default + login, and disable auto-lock. The
+    password is empty, set it as default, check that macOS resolves it as the
+    login keychain, and disable auto-lock. The
     launcher unlocks it (-p "") per invocation, because a no-GUI security
     session re-locks on its own between launches.
 
@@ -297,7 +298,7 @@ def phase_local_keychain(*, ctx: common.Ctx) -> None:
     adds no exposure.
 
     Idempotent: create-keychain runs only if the file is absent; the
-    settings/default/login/unlock steps are safe to re-apply."""
+    settings/default/unlock steps are safe to re-apply."""
     kc = str(CLAUDE_RO_KEYCHAIN)
     if ctx.dry_run:
         common.log.info("[dry-run] would provision empty-password login keychain %s", kc)
@@ -319,7 +320,12 @@ def phase_local_keychain(*, ctx: common.Ctx) -> None:
     # No -t / -l → no auto-lock timeout, no lock-on-sleep.
     common.admin_run_a([*security, "set-keychain-settings", kc])
     common.admin_run_a([*security, "default-keychain", "-s", kc])
-    common.admin_run_a([*security, "login-keychain", "-s", kc])
+    # No `login-keychain -s`: Apple compiled it out of the security tool (it
+    # always exits 1, silently). macOS picks the login keychain by path, so a
+    # keychain at login.keychain-db already is one — verify that instead.
+    login = common.admin_run_a([*security, "login-keychain"]).stdout.strip().strip('"')
+    if login != kc:
+        raise SystemExit(f"claude-ro's login keychain is {login!r}, expected {kc}")
     common.admin_run_a([*security, "unlock-keychain", "-p", "", kc])
     common.log.info("configured %s as claude-ro default+login keychain (auto-lock off)", kc)
 
