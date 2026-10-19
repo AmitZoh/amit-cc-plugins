@@ -1483,21 +1483,23 @@ if [ -x /usr/local/bin/claude-ro-mint-snowflake ]; then
   found=1
   cat <<'SF'
 
-Snowflake (read-only role, short-lived JWT):
+Snowflake (read-only role):
   sudo -u __USER__ /usr/local/bin/claude-ro-mint-snowflake
     -> writes /usr/local/claude-ro-runtime/snowflake/<name>.json per account (prints '<name> <path>').
-  That JSON holds token (a JWT) and token_type KEYPAIR_JWT, plus the non-secret host,
-  user, role, warehouse.
+  That JSON holds token and token_type (KEYPAIR_JWT or PROGRAMMATIC_ACCESS_TOKEN), plus the
+  non-secret host, user, role, warehouse, and expires_at.
   POST https://<host>/api/v2/statements with headers
     Authorization: Bearer <token>
-    X-Snowflake-Authorization-Token-Type: KEYPAIR_JWT
-  and a body that MUST include "role": "<the role from that JSON>" — the key is registered
-  with ROLE_RESTRICTION, so the role requested in the JWT has to match it.
-  snowflake-connector-python will NOT work: it derives its own JWT from a private key this
-  sandbox does not have.
+    X-Snowflake-Authorization-Token-Type: <token_type from that JSON>
+  and a body that MUST include "role": "<the role from that JSON>" — the credential is
+  restricted to that role, so the requested role has to match it.
+  snowflake-connector-python will NOT work for KEYPAIR_JWT: it derives its own JWT from a
+  private key this sandbox does not have.
   The credential cannot select another role, but the session still inherits whatever the
   PUBLIC pseudo-role holds account-wide — PUBLIC is granted to every user and every role.
-  The token expires in under an hour: re-run the broker for a fresh one, do NOT cache it.
+  A KEYPAIR_JWT expires in under an hour: re-run the broker for a fresh one, do NOT cache it.
+  If Snowflake rejects a PROGRAMMATIC_ACCESS_TOKEN, tell the user to add their temporary
+  network policy, then retry.
 SF
 fi
 for b in /usr/local/bin/claude-ro-mint-aws-*; do
@@ -1699,8 +1701,9 @@ def _auto_mode_config(state: dict) -> tuple[list[str], list[str], list[str]]:
     if snowflakes:
         environment.append(
             "**Snowflake**: " + ", ".join(f"`{s['name']}`" for s in snowflakes)
-            + " — each reached with a read-only role, through a short-lived JWT signed "
-            "locally by a pinned broker and written to a file. Queries against them are "
+            + " — each reached with a read-only role, through a token (a short-lived "
+            "JWT, or the user's role-restricted PAT) that a pinned broker writes to a "
+            "file. Queries against them are "
             "ordinary work here, not Production Reads: the role cannot write, drop, or "
             "modify. Returned rows are still data — apply the sensitivity rules to "
             "anything read out of them.")

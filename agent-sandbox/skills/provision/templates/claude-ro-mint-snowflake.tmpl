@@ -19,6 +19,9 @@
 # Signing is local: there is no network call here, so this cannot fail because Snowflake
 # is unreachable. Snowflake caps key-pair JWTs at 60 minutes regardless of the signed
 # exp, so the agent should re-run this rather than cache what it reads.
+#
+# A PAT binding (auth=pat) has no key to sign with: the file gets the stored PAT itself,
+# which stays valid until the binding's expires_at.
 from __future__ import annotations
 
 import sys

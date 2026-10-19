@@ -6,7 +6,11 @@ Deletes the stored RSA private key and the state entry. The mint helper is SHARE
 across all bound accounts, so its helper + sudoers drop-in are removed only when
 this is the last one.
 
-Deleting the private key is what actually ends this machine's access — without it
+A PAT binding is different: the PAT stays valid in Snowflake until it expires or
+is removed, so deleting the local copy does not end access by itself. Unbind
+prints the REMOVE statement for the engineer to run on their own user.
+
+For a key-pair binding, deleting the private key is what actually ends this machine's access — without it
 no JWT can be signed. The Snowflake service user itself is owner-managed and is
 never touched here (the laptop holds no credential able to drop it), so this
 prints the DROP USER statement for the owner to run when retiring access for good.
@@ -55,13 +59,18 @@ def main() -> None:
         broker_note = "  - No mint helper to remove (this bind never completed)\n"
     else:
         broker_note = "  - Leave the shared mint helper in place (other accounts still bound)\n"
-    confirm = (
-        f"About to unbind Snowflake {name!r}:\n"
-        f"  - Delete the stored private key {common.SECRETS_DIR}/{record['secret_ref']}\n"
-        f"  - The service user {record['service_user']} is left intact (owner-managed)\n"
-        f"{broker_note}"
-        f"Continue?"
-    )
+    snow = common.load_provider("snowflake")
+    pat = snow.is_pat(record)
+    if pat:
+        what = (f"  - Delete the stored PAT {common.SECRETS_DIR}/{record['secret_ref']}\n"
+                f"  - The PAT stays valid in Snowflake until you remove it (the "
+                f"statement is printed at the end)\n")
+    else:
+        what = (f"  - Delete the stored private key "
+                f"{common.SECRETS_DIR}/{record['secret_ref']}\n"
+                f"  - The service user {record['service_user']} is left intact "
+                f"(owner-managed)\n")
+    confirm = f"About to unbind Snowflake {name!r}:\n{what}{broker_note}Continue?"
     if not common.prompt_yes_no(confirm, default=False, ctx=ctx):
         print("aborted", file=sys.stderr)
         sys.exit(1)
@@ -76,7 +85,6 @@ def main() -> None:
     # revoke() before secret_delete, per the contract — snowflake's is a no-op (the
     # service user is owner-managed), but the ordering is the one unbind_github relies
     # on and keeping it uniform means a future remote teardown needs no re-think.
-    snow = common.load_provider("snowflake")
     snow.revoke(record, common.secret_read(record["secret_ref"]))
 
     common.secret_delete(record["secret_ref"], ctx=ctx)
@@ -107,9 +115,13 @@ def main() -> None:
 
     message = snow.owner_teardown_request(record)
     print("\n" + "=" * 78, file=sys.stderr)
-    print("The private key is gone, so this machine can no longer authenticate. To retire\n"
-          "the account in Snowflake itself, send this to whoever administers it:",
-          file=sys.stderr)
+    if pat:
+        print("The local copy of the PAT is gone, but the PAT itself still works until\n"
+              "it expires. To end it now, run this in Snowsight:", file=sys.stderr)
+    else:
+        print("The private key is gone, so this machine can no longer authenticate. To "
+              "retire\nthe account in Snowflake itself, send this to whoever administers "
+              "it:", file=sys.stderr)
     print("=" * 78 + "\n", file=sys.stderr)
     print(message, file=sys.stderr)
     print("=" * 78, file=sys.stderr)
@@ -118,8 +130,9 @@ def main() -> None:
         print("This message is now on your clipboard.", file=sys.stderr)
     except (OSError, subprocess.SubprocessError):
         pass  # non-fatal: the message is printed above regardless
-    common.log.info("unbound Snowflake %s (service user %s left intact)%s",
-                    name, record["service_user"],
+    common.log.info("unbound Snowflake %s (%s)%s", name,
+                    "PAT left in Snowflake until removed" if pat else
+                    f"service user {record['service_user']} left intact",
                     "; removed the shared mint broker (no accounts remain)"
                     if last and installed else "")
 

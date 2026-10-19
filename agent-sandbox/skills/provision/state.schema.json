@@ -248,14 +248,30 @@
     },
     "snowflake": {
       "type": "array",
-      "description": "Top-level Snowflake accounts the user has bound (independent of accounts[]). ALL bound Snowflake identities are reachable at once in claude-ro via the shared claude-ro-mint-snowflake broker (no per-launch selection). Auth is RSA key-pair: the durable private key PEM lives mode-600 under the secrets dir and the broker signs a short-lived JWT with it, so no long-lived credential ever enters the sandbox. The read-only service user + role are created by the Snowflake account admin out of band; only the private key is stored.",
+      "description": "Top-level Snowflake accounts the user has bound (independent of accounts[]). ALL bound Snowflake identities are reachable at once in claude-ro via the shared claude-ro-mint-snowflake broker (no per-launch selection). Auth is RSA key-pair: the durable private key PEM lives mode-600 under the secrets dir and the broker signs a short-lived JWT with it, so no long-lived credential ever enters the sandbox. The read-only service user + role are created by the Snowflake account admin out of band; only the private key is stored. A binding with auth=pat instead stores a role-restricted PAT the engineer created on their own user; the broker hands that PAT itself to the sandbox, so it is valid there until expires_at.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "name", "account", "service_user", "qualified_username", "public_key_fp", "role", "secret_ref", "granted_at"
+          "name", "account", "service_user", "role", "secret_ref", "granted_at"
         ],
+        "if": { "properties": { "auth": { "const": "pat" } }, "required": ["auth"] },
+        "then": { "required": ["token_name", "expires_at"] },
+        "else": { "required": ["qualified_username", "public_key_fp"] },
         "properties": {
+          "auth": {
+            "enum": ["keypair", "pat"],
+            "description": "How the binding authenticates. Absent means keypair (records from before PAT support)."
+          },
+          "token_name": {
+            "type": "string",
+            "description": "auth=pat only: the PAT's name on the engineer's user, for the REMOVE statement unbind and renewal print."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "auth=pat only: when the PAT expires, computed at bind from DAYS_TO_EXPIRY. verify warns before it."
+          },
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$",
@@ -267,7 +283,7 @@
           },
           "service_user": {
             "type": "string",
-            "description": "The read-only Snowflake service user the key is registered on (e.g. CLAUDE_RO_<ENGINEER>), created out of band by the account admin. Stored unqualified for display and for the admin-side ALTER USER statements."
+            "description": "The Snowflake user the credential belongs to. Key pair: the read-only service user (e.g. CLAUDE_RO_<ENGINEER>), created out of band by the account admin. PAT: the engineer's own user, exactly as CURRENT_USER() returned it. Stored unqualified for display and for the ALTER USER statements."
           },
           "qualified_username": {
             "type": "string",
@@ -291,7 +307,7 @@
           },
           "secret_ref": {
             "type": "string",
-            "description": "Filename (not path) of the mode-600 RSA private-key PEM under the secrets dir. Never the key itself, and never a path — the secrets dir is resolved by the broker so state.json cannot be edited to point the reader at an arbitrary file."
+            "description": "Filename (not path) of the mode-600 RSA private-key PEM (or, for auth=pat, the PAT) under the secrets dir. Never the key itself, and never a path — the secrets dir is resolved by the broker so state.json cannot be edited to point the reader at an arbitrary file."
           },
           "granted_at": { "type": "string", "format": "date-time" }
         }

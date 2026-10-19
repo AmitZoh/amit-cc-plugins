@@ -19,6 +19,11 @@ Two-phase and resumable, like bind_mongodb:
   Phase B  (re-run once the admin has run it) mints end-to-end and installs the
            broker.
 
+When no admin is available, Phase A can instead bind a PAT that the engineer
+creates on their own user (see providers/snowflake.py for the trade-offs). Then
+there is nothing to wait for, so Phase B follows at once. A re-run while a PAT
+binding exists first offers to renew it.
+
 Usage:
     bind_snowflake.py
 """
@@ -40,6 +45,9 @@ import _common as common  # noqa: E402
 # can resume a warehouse (i.e. spend money) and anything CREATE/INSERT-shaped is
 # a write, so neither belongs in a read-only sandbox.
 READ_ONLY_PRIVILEGES = frozenset({"SELECT", "USAGE", "REFERENCES", "MONITOR", "READ"})
+
+KEYPAIR_CHOICE = "A key pair on a new service user (a Snowflake admin must run one request)"
+PAT_CHOICE = "A PAT on your own user (no admin; expires every 30 days)"
 
 DISCOVERY_SQL = """EXECUTE IMMEDIATE $$
 DECLARE
@@ -204,8 +212,8 @@ def main() -> None:
 
     if ctx.dry_run:
         common.log.info("[dry-run] would ask you to paste one query result, pick a "
-                        "role, name the account, then generate a key pair and print "
-                        "the admin request (no writes)")
+                        "role, name the account, then either generate a key pair and "
+                        "print the admin request, or take a PAT (no writes)")
         return
 
     _phase_a(ctx=ctx, state=state)
@@ -217,6 +225,18 @@ def _phase_a(*, ctx: common.Ctx, state: dict) -> None:
     # is already bound before asking for anything, so a mistaken re-run is obvious
     # at the top rather than at the naming step.
     already = state.get("snowflake") or []
+    snow = common.load_provider("snowflake")
+    pats = [s for s in already if snow.is_pat(s)]
+    if pats:
+        another = "No — bind another account"
+        renewals = {f"Renew {s['name']} (expires {s['expires_at'][:10]})": s
+                    for s in pats}
+        choice = common.pick_from_list(
+            "Renew the PAT of a bound account, or bind another account?",
+            [*renewals, another])
+        if choice != another:
+            _renew_pat(renewals[choice], ctx=ctx)
+            return
     if already:
         print("\nAlready bound: "
               + ", ".join(f"{s['name']} ({s['account']})" for s in already)
@@ -227,7 +247,13 @@ def _phase_a(*, ctx: common.Ctx, state: dict) -> None:
     role = _choose_role(roles)
     name = _choose_name(account, state)
 
-    snow = common.load_provider("snowflake")
+    pat = common.pick_from_list(
+        "How should the sandbox log in to Snowflake?",
+        [KEYPAIR_CHOICE, PAT_CHOICE]) == PAT_CHOICE
+    if pat:
+        _bind_pat(account, whoami, warehouse, role, name, ctx=ctx)
+        return
+
     engineer = common.current_username()
     service_user = f"CLAUDE_RO_{engineer.upper().replace('-', '_').replace('.', '_')}"
     secret_ref = f"snowflake-{name}.key"
@@ -331,6 +357,88 @@ def _phase_b(record: dict, *, ctx: common.Ctx) -> None:
 
     common.log.info("Snowflake '%s' is live in the sandbox — reads as %s, and it cannot "
                     "switch to any other role.", name, record.get("role"))
+
+
+def _bind_pat(account: str, user: str, warehouse: str, role: str, name: str, *,
+              ctx: common.Ctx) -> None:
+    """Take a PAT the engineer creates on their own user, prove it, store it, and
+    go straight to Phase B — there is no admin to wait for."""
+    snow = common.load_provider("snowflake")
+    today = datetime.date.today()
+    record = {
+        "name": name,
+        "account": account,
+        "auth": "pat",
+        "service_user": user,
+        "role": role,
+        "token_name": snow.pat_token_name(name, today),
+        "expires_at": snow.pat_expires_at(today),
+        "secret_ref": f"snowflake-{name}.pat",
+        "granted_at": common.now_iso(),
+    }
+    if warehouse:
+        record["warehouse"] = warehouse
+    secret = _capture_pat(record, today)
+    snow.provision(record, secret, ctx=ctx)  # SystemExit with guidance on failure
+
+    if not _secrets_dir_ready():
+        with common.admin_session(
+            title=f"agent-sandbox: bind Snowflake {name}",
+            actions=[f"Create secrets dir {common.SECRETS_DIR} (once)"],
+        ):
+            common.ensure_secrets_dir(ctx=ctx)
+    common.secret_store(record["secret_ref"], secret, ctx=ctx)
+    with common.update_state() as s:
+        common.begin_operation(s, "bind-snowflake", {"kind": "snowflake", "name": name})
+        common.mark_phase(s, "secret_stored")
+        s.setdefault("snowflake", []).append(record)
+    _phase_b(record, ctx=ctx)
+
+
+def _renew_pat(record: dict, *, ctx: common.Ctx) -> None:
+    """Replace a PAT binding's token. Probed before anything is written, so a
+    failed renewal leaves the old binding exactly as it was."""
+    snow = common.load_provider("snowflake")
+    today = datetime.date.today()
+    old_remove = snow.pat_remove_sql(record)
+    renewed = {**record,
+               "token_name": snow.pat_token_name(record["name"], today),
+               "expires_at": snow.pat_expires_at(today),
+               "granted_at": common.now_iso()}
+    secret = _capture_pat(renewed, today)
+    snow.provision(renewed, secret, ctx=ctx)
+    common.secret_store(record["secret_ref"], secret, ctx=ctx)
+    with common.update_state() as s:
+        s["snowflake"] = [renewed if x["name"] == record["name"] else x
+                          for x in s.get("snowflake") or []]
+    common.log.info("renewed the PAT for '%s'; it expires on %s.",
+                    record["name"], renewed["expires_at"][:10])
+    if renewed["token_name"] != record["token_name"]:
+        print("\nThe old PAT still works until it expires. To end it now, run this in "
+              f"Snowsight:\n\n    {old_remove}\n", file=sys.stderr)
+
+
+def _capture_pat(record: dict, today: datetime.date) -> str:
+    """Print the statement that creates the PAT, then take its secret through the
+    hidden-answer prompt, so it never reaches argv, the terminal or the model."""
+    snow = common.load_provider("snowflake")
+    sql = snow.pat_create_sql(record["service_user"], record["token_name"],
+                              record["role"], today=today.isoformat())
+    print("\nIn the same Snowsight worksheet, run this. It creates a PAT on your own "
+          f"user that can only use {record['role']}\nand expires in "
+          f"{snow.PAT_DAYS_TO_EXPIRY} days:\n\n{sql}\n\n"
+          "Copy the token_secret value from the result. Snowflake shows it only once.\n"
+          f"\n{snow.NETWORK_POLICY_HINT} The next step logs in with the PAT to test "
+          "it.\n", file=sys.stderr)
+    try:
+        subprocess.run(["pbcopy"], input=sql, text=True, check=True, timeout=5)
+        print("The statement is on your clipboard.", file=sys.stderr)
+    except (OSError, subprocess.SubprocessError):
+        pass  # non-fatal: the statement is printed above regardless
+    secret = common.prompt_secret("Paste the token_secret value").strip()
+    if not secret:
+        raise SystemExit("nothing pasted — run bind-snowflake again when you have it.")
+    return secret
 
 
 def _secrets_dir_ready() -> bool:

@@ -16,12 +16,23 @@ ROLE_RESTRICTION, and then "the key pair can only be used to authenticate if the
 role requested in the JWT matches this role". That restriction is what makes a
 locally-signed JWT safe to hand to the sandbox.
 
-Why not a PAT, which also supports ROLE_RESTRICTION: PATs require the user to be
-subject to a network policy to generate and use — verified the hard way against a
-live SERVICE_AGENT account — and there is no equivalent requirement for key pairs.
-The PAT also needed minting round-trips, rotation, and a privilege grant that let
-the account manage its own tokens. None of that exists here: signing is local,
-nothing expires on a schedule, and nothing is rotated.
+The key pair is the default because it needs no network policy, nothing expires
+on a schedule, and only a derived JWT ever enters the sandbox. Its cost is an admin:
+someone with USERADMIN must create the service user and register the key.
+
+When there is no such admin, a binding can instead use a PAT (`auth: "pat"`) that
+the engineer creates on their OWN user in Snowsight, with ROLE_RESTRICTION to the
+read-only role — no privilege is needed to add a PAT to one's own user. The
+trade-offs, accepted deliberately:
+  - The sandbox holds the PAT itself, not a derived token. Snowflake documents no
+    exchange of a PAT for a short-lived one, so a leaked copy works until the PAT
+    expires. DAYS_TO_EXPIRY is kept short (PAT_DAYS_TO_EXPIRY) and verify warns
+    before expiry; re-running bind-snowflake renews it.
+  - Queries run as the engineer's own user, under the restricted role only
+    (secondary roles are ignored for a role-restricted PAT).
+  - Snowflake accepts a PAT from a PERSON user only while a network policy covers
+    that user. Engineers add a temporary one when they use the sandbox; the bind
+    probe and the capability note both say so.
 
 WHAT THIS DOES NOT CONTAIN: Snowflake's PUBLIC pseudo-role is "automatically
 granted to every user and every role", and privileges inherit upward, so a session
@@ -55,7 +66,28 @@ import urllib.request
 JWT_LIFETIME_SECONDS = 3540
 # The name the key pair is registered under on the Snowflake account.
 KEY_PAIR_NAME = "claude_ro"
+# PAT bindings: how long the engineer's PAT lives, and how early verify warns.
+PAT_DAYS_TO_EXPIRY = 30
+PAT_WARN_DAYS = 7
 UA = "claude-ro-sandbox"
+NETWORK_POLICY_HINT = (
+    "Snowflake accepts a PAT only while a network policy covers your user — check "
+    "that your temporary network policy is active.")
+
+
+def is_pat(record: dict) -> bool:
+    """Records from before PAT support carry no `auth` field; they are key pairs."""
+    return record.get("auth") == "pat"
+
+
+def token_type(record: dict) -> str:
+    return "PROGRAMMATIC_ACCESS_TOKEN" if is_pat(record) else "KEYPAIR_JWT"
+
+
+def bearer(record: dict, secret: str) -> str:
+    """The token to send as `Authorization: Bearer`: the PAT itself, or a JWT
+    signed from the private key."""
+    return secret.strip() if is_pat(record) else _sign_jwt(record, secret)
 
 
 # ---------- low-level: JWT + SQL REST API ----------
@@ -117,14 +149,14 @@ def _sign_jwt(record: dict, pem: str) -> str:
     return f"{header}.{payload}.{sig}"
 
 
-def _sql(record: dict, jwt: str, statement: str, *, role: str | None = None,
+def _sql(record: dict, token: str, statement: str, *, role: str | None = None,
          timeout: int = 30) -> tuple[int, dict | None]:
     """Run one statement through the SQL REST API. Returns (status, parsed);
     raises only on transport errors so callers can branch on HTTP status.
 
     `role` defaults to the record's bound role and is sent in the request body.
-    That is not cosmetic: the key pair's ROLE_RESTRICTION means Snowflake accepts
-    the JWT only when the requested role matches, so omitting it can fail auth
+    That is not cosmetic: the credential's ROLE_RESTRICTION means Snowflake accepts
+    it only when the requested role matches, so omitting it can fail auth
     outright rather than merely picking a different role.
 
     The Python connector is deliberately unused: it derives a JWT from a private
@@ -142,8 +174,8 @@ def _sql(record: dict, jwt: str, statement: str, *, role: str | None = None,
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(), method="POST",
         headers={
-            "Authorization": f"Bearer {jwt}",
-            "X-Snowflake-Authorization-Token-Type": "KEYPAIR_JWT",
+            "Authorization": f"Bearer {token}",
+            "X-Snowflake-Authorization-Token-Type": token_type(record),
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": UA,
@@ -194,9 +226,12 @@ def mint(record: dict, secret: str) -> dict:
     value needed to build a request, because the sandbox cannot read state.json and
     a bare token would leave it guessing at exactly the values that made this hard
     the first time round."""
-    jwt = _sign_jwt(record, secret)
-    expires = (_dt.datetime.now(_dt.timezone.utc)
-               + _dt.timedelta(seconds=JWT_LIFETIME_SECONDS))
+    if is_pat(record):
+        expires_at = record["expires_at"]
+    else:
+        expires = (_dt.datetime.now(_dt.timezone.utc)
+                   + _dt.timedelta(seconds=JWT_LIFETIME_SECONDS))
+        expires_at = expires.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {"SNOWFLAKE_JSON": json.dumps({
         "account": record["account"],
         "host": account_host(record["account"]),
@@ -204,9 +239,9 @@ def mint(record: dict, secret: str) -> dict:
         "role": record.get("role") or "",
         "warehouse": record.get("warehouse") or "",
         "database": record.get("database") or "",
-        "token": jwt,
-        "token_type": "KEYPAIR_JWT",
-        "expires_at": expires.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "token": bearer(record, secret),
+        "token_type": token_type(record),
+        "expires_at": expires_at,
     }, indent=2)}
 
 
@@ -235,7 +270,13 @@ def owner_teardown_request(record: dict) -> str:
     recreate the user, and the next bind fails looking exactly like an admin who
     never ran the request.
 
-    Slack-formatted, same as admin_request — see its docstring for the rules."""
+    Slack-formatted, same as admin_request — see its docstring for the rules.
+
+    A PAT binding has no service user to retire — it is the engineer's own user —
+    and its PAT stays valid remotely until removed, so the message is the
+    engineer's own statement to run instead."""
+    if is_pat(record):
+        return pat_remove_sql(record)
     fence = "```"
     return f"""Hi — could you remove the read-only Snowflake service account I had you
 create for the sandbox on my Mac?
@@ -253,8 +294,17 @@ def provision(record_in: dict, secret: str, *, ctx) -> dict:
 
     Raises SystemExit on failure; Snowflake is always network-reachable, so there
     is no legitimate 'unreachable, skip it' case here."""
-    jwt = _sign_jwt(record_in, secret)
-    status, data = _sql(record_in, jwt, "SELECT CURRENT_USER(), CURRENT_ROLE()")
+    status, data = _sql(record_in, bearer(record_in, secret),
+                        "SELECT CURRENT_USER(), CURRENT_ROLE()")
+    if status != 200 and is_pat(record_in):
+        raise SystemExit(
+            f"Snowflake read probe failed ({_error_text(status, data)}).\n"
+            f"  account: {record_in['account']}\n"
+            f"  user:    {record_in['service_user']}\n"
+            f"  role:    {record_in.get('role')}\n"
+            f"{NETWORK_POLICY_HINT}\n"
+            "Otherwise, check that you pasted the token_secret value whole, and that "
+            "the PAT was created with ROLE_RESTRICTION set to this role.")
     if status != 200:
         raise SystemExit(
             f"Snowflake read probe failed ({_error_text(status, data)}).\n"
@@ -276,6 +326,16 @@ def verify(record: dict, env: dict, *, ctx) -> list[dict]:
     blob = json.loads(env["SNOWFLAKE_JSON"])
     jwt = blob["token"]
     results: list[dict] = []
+
+    if is_pat(record):
+        left = pat_days_left(record)
+        results.append({
+            "name": "snowflake_pat_expiry",
+            "expected": f"> {PAT_WARN_DAYS} days left", "actual": f"{left} days left",
+            "passed": left > PAT_WARN_DAYS,
+            "detail": "" if left > PAT_WARN_DAYS else
+                      "the PAT expires soon — run bind-snowflake and choose to renew it",
+        })
 
     status, data = _sql(record, jwt, "SELECT CURRENT_USER(), CURRENT_ROLE()")
     read_ok = status == 200
@@ -318,7 +378,7 @@ def verify(record: dict, env: dict, *, ctx) -> list[dict]:
         "expected": "refused", "actual": str(sstatus),
         "passed": switch_denied,
         "detail": "" if switch_denied else
-                  "the key pair authenticated as PUBLIC — its ROLE_RESTRICTION is "
+                  "the credential authenticated as PUBLIC — its ROLE_RESTRICTION is "
                   "not confining it, and the sandbox is not contained",
     })
 
@@ -428,3 +488,39 @@ ALTER USER {service_user} ADD KEY PAIR {KEY_PAIR_NAME}
 {fence}
 
 To revoke at any point: `DROP USER {service_user};`"""
+
+
+# ---------- PAT bindings (bind-time; pat_days_left also runs in verify) ----------
+
+def pat_token_name(name: str, today: _dt.date) -> str:
+    """Dated, so a renewal adds a new PAT instead of colliding with the old one,
+    which then simply expires."""
+    stem = name.upper().replace("-", "_").replace(".", "_")
+    return f"CLAUDE_RO_{stem}_{today.strftime('%Y%m%d')}"
+
+
+def pat_expires_at(today: _dt.date) -> str:
+    """When a PAT created today with PAT_DAYS_TO_EXPIRY expires — recorded at bind,
+    because the sandbox cannot ask Snowflake."""
+    end = today + _dt.timedelta(days=PAT_DAYS_TO_EXPIRY)
+    return f"{end.isoformat()}T00:00:00Z"
+
+
+def pat_days_left(record: dict) -> int:
+    end = _dt.datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
+    return (end - _dt.datetime.now(_dt.timezone.utc)).days
+
+
+def pat_create_sql(user: str, token_name: str, role: str, *, today: str) -> str:
+    """The statement the engineer runs in Snowsight on their OWN user. The user name
+    is quoted because CURRENT_USER() returns it exactly as stored, and names such
+    as e-mail addresses are not valid bare identifiers."""
+    return (f'ALTER USER "{user}" ADD PROGRAMMATIC ACCESS TOKEN {token_name}\n'
+            f"  ROLE_RESTRICTION = '{role}'\n"
+            f"  DAYS_TO_EXPIRY = {PAT_DAYS_TO_EXPIRY}\n"
+            f"  COMMENT = 'Read-only sandbox for Claude Code, created {today}.';")
+
+
+def pat_remove_sql(record: dict) -> str:
+    return (f'ALTER USER "{record["service_user"]}" REMOVE PROGRAMMATIC ACCESS TOKEN '
+            f'{record["token_name"]};')
