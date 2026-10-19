@@ -306,16 +306,21 @@ def phase_local_keychain(*, ctx: common.Ctx) -> None:
     exists = common.admin_run_a(
         ["-u", CLAUDE_RO_USER, "test", "-f", kc], check=False,
     ).returncode == 0
+    # `sudo -u` keeps the caller's HOME, and `security` writes its keychain
+    # preferences under $HOME/Library/Preferences — it refuses a home claude-ro
+    # does not own. Set HOME explicitly rather than rely on sudo -H, whose effect
+    # depends on the sudoers policy.
+    security = ["-u", CLAUDE_RO_USER, "env", f"HOME={CLAUDE_RO_HOME}", "security"]
     if not exists:
-        common.admin_run_a(["-u", CLAUDE_RO_USER, "security", "create-keychain", "-p", "", kc])
+        common.admin_run_a([*security, "create-keychain", "-p", "", kc])
         common.log.info("created login keychain %s", kc)
     else:
         common.log.info("login keychain %s already exists", kc)
     # No -t / -l → no auto-lock timeout, no lock-on-sleep.
-    common.admin_run_a(["-u", CLAUDE_RO_USER, "security", "set-keychain-settings", kc])
-    common.admin_run_a(["-u", CLAUDE_RO_USER, "security", "default-keychain", "-s", kc])
-    common.admin_run_a(["-u", CLAUDE_RO_USER, "security", "login-keychain", "-s", kc])
-    common.admin_run_a(["-u", CLAUDE_RO_USER, "security", "unlock-keychain", "-p", "", kc])
+    common.admin_run_a([*security, "set-keychain-settings", kc])
+    common.admin_run_a([*security, "default-keychain", "-s", kc])
+    common.admin_run_a([*security, "login-keychain", "-s", kc])
+    common.admin_run_a([*security, "unlock-keychain", "-p", "", kc])
     common.log.info("configured %s as claude-ro default+login keychain (auto-lock off)", kc)
 
 
