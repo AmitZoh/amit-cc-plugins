@@ -448,21 +448,22 @@ def _probe_pat(record: dict, secret: str, *, ctx: common.Ctx) -> None:
 
 
 def _capture_pat(record: dict, today: datetime.date) -> str:
-    """Print the statement that creates the PAT, then take its secret through the
+    """Show the statement that creates the PAT — the record's token name and expiry
+    are only true if the user runs exactly this — then take its secret through the
     hidden-answer prompt, so it never reaches argv, the terminal or the model."""
     snow = common.load_provider("snowflake")
     sql = snow.pat_create_sql(record["service_user"], record["token_name"],
                               record["role"], today=today.isoformat())
-    print("\nIn the same Snowsight worksheet, run this. It creates a PAT on your own "
-          f"user that can only use {record['role']}\nand expires in "
-          f"{snow.PAT_DAYS_TO_EXPIRY} days:\n\n{sql}\n\n"
-          "Copy the token_secret value from the result. Snowflake shows it only once.\n",
-          file=sys.stderr)
     try:
         subprocess.run(["pbcopy"], input=sql, text=True, check=True, timeout=5)
-        print("The statement is on your clipboard.", file=sys.stderr)
+        where = "It is also on your clipboard. "
     except (OSError, subprocess.SubprocessError):
-        pass  # non-fatal: the statement is printed above regardless
+        where = ""  # non-fatal: the statement is shown regardless
+    common.show_copyable(
+        "Run this in a Snowsight worksheet. It creates a PAT on your own user that can "
+        f"only use {record['role']} and expires in {snow.PAT_DAYS_TO_EXPIRY} days. "
+        f"{where}Then copy the token_secret value from the result — Snowflake shows "
+        "it only once — and click Continue.", sql)
     secret = common.prompt_secret("Paste the token_secret value").strip()
     if not secret:
         raise SystemExit("nothing pasted — run bind-snowflake again when you have it.")

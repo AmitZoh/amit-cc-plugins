@@ -663,6 +663,36 @@ def prompt_text(message: str, *, title: str = "agent-sandbox") -> str:
     return proc.stdout.rstrip("\n").strip()
 
 
+def show_copyable(message: str, text: str, *, title: str = "agent-sandbox") -> None:
+    """Show `text` (e.g. SQL the user must run) where the user can copy it, and wait
+    until they are done. Always printed to stderr too. TTY → the print is the
+    channel, then wait for Return; non-TTY → a dialog whose text field holds `text`,
+    because printed output from a backgrounded bind reaches the user late or never.
+    Raises SystemExit if canceled."""
+    print(f"\n{message}\n\n{text}\n", file=sys.stderr)
+    if sys.stdin.isatty():
+        try:
+            input("Press Return when done: ")
+        except EOFError:
+            raise SystemExit(f"no input for: {message}")
+        return
+
+    def _esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
+    osa_line = (
+        f'display dialog "{_esc(message)}" default answer "{_esc(text)}" '
+        f'buttons {{"Cancel", "Continue"}} '
+        f'with icon note with title "{_esc(title)}"'
+    )
+    proc = subprocess.run(["osascript", "-e", osa_line],
+                          capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        if "User canceled" in (proc.stderr or ""):
+            raise SystemExit(f"canceled at: {message}")
+        raise SystemExit(f"dialog failed: {proc.stderr}")
+
+
 def pick_from_list(prompt: str, items: list[str], *,
                    default_index: int | None = None,
                    ctx: Ctx | None = None) -> str:
