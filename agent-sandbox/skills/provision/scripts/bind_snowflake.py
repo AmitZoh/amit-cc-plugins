@@ -41,10 +41,14 @@ SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_DIR / "scripts"))
 import _common as common  # noqa: E402
 
-# Privileges a role may hold and still be offered. Deliberately narrow: OPERATE
-# can resume a warehouse (i.e. spend money) and anything CREATE/INSERT-shaped is
-# a write, so neither belongs in a read-only sandbox.
-READ_ONLY_PRIVILEGES = frozenset({"SELECT", "USAGE", "REFERENCES", "MONITOR", "READ"})
+# Privileges a role may hold and still be offered. Deliberately narrow: anything
+# CREATE/INSERT-shaped is a write. OPERATE is reported with what it is granted on
+# (OPERATE:WAREHOUSE) and allowed only on warehouses: it lets the session resume
+# a warehouse, and also suspend one, a shared one included — accepted, since
+# queries need a running warehouse. OPERATE on anything else (tasks, …) still
+# disqualifies the role.
+READ_ONLY_PRIVILEGES = frozenset({"SELECT", "USAGE", "REFERENCES", "MONITOR", "READ",
+                                  "OPERATE:WAREHOUSE"})
 
 KEYPAIR_CHOICE = "A key pair on a new service user (a Snowflake admin must run one request)"
 PAT_CHOICE = "A PAT on your own user (no admin; expires every 30 days)"
@@ -60,8 +64,8 @@ BEGIN
   FOR i IN 0 TO ARRAY_SIZE(roles)-1 DO
     r := roles[i]::STRING;
     EXECUTE IMMEDIATE 'SHOW GRANTS TO ROLE "' || r || '"';
-    privs := (SELECT COALESCE(LISTAGG(DISTINCT "privilege", '+')
-                     WITHIN GROUP (ORDER BY "privilege"), 'none')
+    privs := (SELECT COALESCE(LISTAGG(DISTINCT IFF("privilege" = 'OPERATE',
+                              'OPERATE:' || "granted_on", "privilege"), '+'), 'none')
               FROM TABLE(RESULT_SCAN(LAST_QUERY_ID())));
     info := info || ' | ' || r || '=' || privs;
   END FOR;
