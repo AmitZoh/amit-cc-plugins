@@ -371,15 +371,16 @@ def _bind_pat(account: str, user: str, warehouse: str, role: str, name: str, *,
         "auth": "pat",
         "service_user": user,
         "role": role,
-        "token_name": snow.pat_token_name(name, today),
+        "token_name": snow.pat_token_name(name, datetime.datetime.now()),
         "expires_at": snow.pat_expires_at(today),
         "secret_ref": f"snowflake-{name}.pat",
         "granted_at": common.now_iso(),
     }
     if warehouse:
         record["warehouse"] = warehouse
+    _remind_network_policy()
     secret = _capture_pat(record, today)
-    snow.provision(record, secret, ctx=ctx)  # SystemExit with guidance on failure
+    _probe_pat(record, secret, ctx=ctx)
 
     if not _secrets_dir_ready():
         with common.admin_session(
@@ -402,11 +403,12 @@ def _renew_pat(record: dict, *, ctx: common.Ctx) -> None:
     today = datetime.date.today()
     old_remove = snow.pat_remove_sql(record)
     renewed = {**record,
-               "token_name": snow.pat_token_name(record["name"], today),
+               "token_name": snow.pat_token_name(record["name"], datetime.datetime.now()),
                "expires_at": snow.pat_expires_at(today),
                "granted_at": common.now_iso()}
+    _remind_network_policy()
     secret = _capture_pat(renewed, today)
-    snow.provision(renewed, secret, ctx=ctx)
+    _probe_pat(renewed, secret, ctx=ctx)
     common.secret_store(record["secret_ref"], secret, ctx=ctx)
     with common.update_state() as s:
         s["snowflake"] = [renewed if x["name"] == record["name"] else x
@@ -418,6 +420,33 @@ def _renew_pat(record: dict, *, ctx: common.Ctx) -> None:
               f"Snowsight:\n\n    {old_remove}\n", file=sys.stderr)
 
 
+def _remind_network_policy() -> None:
+    """A dialog, not a printed line: binds run in the background, so printed output
+    reaches the user late or not at all. No ctx, so --yes cannot skip it."""
+    if not common.prompt_yes_no(
+            "Add your temporary network policy in Snowflake now. The PAT test login "
+            "fails without it."):
+        raise SystemExit("canceled — run bind-snowflake again once the network "
+                         "policy is active.")
+
+
+def _probe_pat(record: dict, secret: str, *, ctx: common.Ctx) -> None:
+    """Test the PAT, and let the user retry with the same one: it already exists in
+    Snowflake, and a same-day re-run would try to create it again under the same
+    name, which Snowflake refuses."""
+    snow = common.load_provider("snowflake")
+    while True:
+        try:
+            snow.provision(record, secret, ctx=ctx)
+            return
+        except SystemExit as exc:
+            print(exc, file=sys.stderr)
+            if not common.prompt_yes_no(
+                    "Snowflake rejected the PAT. Check the network policy, then "
+                    "retry?"):
+                raise
+
+
 def _capture_pat(record: dict, today: datetime.date) -> str:
     """Print the statement that creates the PAT, then take its secret through the
     hidden-answer prompt, so it never reaches argv, the terminal or the model."""
@@ -427,9 +456,8 @@ def _capture_pat(record: dict, today: datetime.date) -> str:
     print("\nIn the same Snowsight worksheet, run this. It creates a PAT on your own "
           f"user that can only use {record['role']}\nand expires in "
           f"{snow.PAT_DAYS_TO_EXPIRY} days:\n\n{sql}\n\n"
-          "Copy the token_secret value from the result. Snowflake shows it only once.\n"
-          f"\n{snow.NETWORK_POLICY_HINT} The next step logs in with the PAT to test "
-          "it.\n", file=sys.stderr)
+          "Copy the token_secret value from the result. Snowflake shows it only once.\n",
+          file=sys.stderr)
     try:
         subprocess.run(["pbcopy"], input=sql, text=True, check=True, timeout=5)
         print("The statement is on your clipboard.", file=sys.stderr)

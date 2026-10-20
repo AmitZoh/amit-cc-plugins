@@ -1,6 +1,6 @@
 {
   "name": "agent-sandbox",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A read-only cloud sandbox for Claude Code: provisions a non-admin macOS identity with a per-user AWS IAM role (ReadOnlyAccess + targeted denies), read-only Kubernetes access entries, and credential-broker access to GitHub, MongoDB and Snowflake, all reached through pinned argless mint brokers so secrets never pass through the model (a Snowflake PAT binding, for setups with no Snowflake admin, puts its 30-day PAT in the sandbox); sweeps AWS surfaces reachable from that identity for plaintext credentials, reporting locations only, never values; and deletes the sandbox when it's no longer needed.",
   "author": {
     "name": "Amit"

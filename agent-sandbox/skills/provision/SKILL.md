@@ -236,7 +236,9 @@ argless broker that keeps the durable secret out of the sandbox AND out of the m
   - Queries run as the engineer's own user, under the restricted role only.
   - Snowflake accepts a PAT from a person-type user only while a network policy covers
     that user. Engineers add a temporary one when they use the sandbox; if Snowflake
-    rejects the PAT, the agent tells the user to add it.
+    rejects the PAT, the agent tells the user to add it. `bind-snowflake` asks for it in
+    a dialog before the PAT steps (shown even with `--yes`), and if the test login still
+    fails, offers to retry with the same PAT.
   - `verify` fails `snowflake_pat_expiry` once 7 or fewer days are left. Running
     `bind-snowflake` again offers to renew a PAT binding: paste a new PAT, and the name,
     role and settings stay.

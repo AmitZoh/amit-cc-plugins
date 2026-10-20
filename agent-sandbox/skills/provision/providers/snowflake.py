@@ -492,11 +492,11 @@ To revoke at any point: `DROP USER {service_user};`"""
 
 # ---------- PAT bindings (bind-time; pat_days_left also runs in verify) ----------
 
-def pat_token_name(name: str, today: _dt.date) -> str:
-    """Dated, so a renewal adds a new PAT instead of colliding with the old one,
-    which then simply expires."""
+def pat_token_name(name: str, now: _dt.datetime) -> str:
+    """Timestamped, so a renewal — or a retry after a failed bind left a PAT behind —
+    adds a new PAT instead of colliding with the old one, which then simply expires."""
     stem = name.upper().replace("-", "_").replace(".", "_")
-    return f"CLAUDE_RO_{stem}_{today.strftime('%Y%m%d')}"
+    return f"CLAUDE_RO_{stem}_{now.strftime('%Y%m%d_%H%M%S')}"
 
 
 def pat_expires_at(today: _dt.date) -> str:
