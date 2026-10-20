@@ -31,8 +31,10 @@ trade-offs, accepted deliberately:
   - Queries run as the engineer's own user, under the restricted role only
     (secondary roles are ignored for a role-restricted PAT).
   - Snowflake accepts a PAT from a PERSON user only while a network policy covers
-    that user. Engineers add a temporary one when they use the sandbox; the bind
-    probe and the capability note both say so.
+    that user, or while the PAT's own MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT
+    lasts (at most 1440 minutes). The create statement sets the bypass, so no
+    policy is needed; once it lapses, the bind probe, verify and the capability
+    note all show the exact statement that re-arms it (pat_rearm_sql).
 
 WHAT THIS DOES NOT CONTAIN: Snowflake's PUBLIC pseudo-role is "automatically
 granted to every user and every role", and privileges inherit upward, so a session
@@ -69,10 +71,15 @@ KEY_PAIR_NAME = "claude_ro"
 # PAT bindings: how long the engineer's PAT lives, and how early verify warns.
 PAT_DAYS_TO_EXPIRY = 30
 PAT_WARN_DAYS = 7
+# Snowflake's maximum for MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT.
+PAT_BYPASS_MINUTES = 1440
 UA = "claude-ro-sandbox"
-NETWORK_POLICY_HINT = (
-    "Snowflake accepts a PAT only while a network policy covers your user — check "
-    "that your temporary network policy is active.")
+
+
+def network_policy_hint(record: dict) -> str:
+    return ("Snowflake accepts this PAT without a network policy only while its "
+            f"{PAT_BYPASS_MINUTES // 60}-hour bypass lasts. To re-arm it, run this in "
+            f"Snowsight:\n\n    {pat_rearm_sql(record)}\n")
 
 
 def is_pat(record: dict) -> bool:
@@ -232,7 +239,7 @@ def mint(record: dict, secret: str) -> dict:
         expires = (_dt.datetime.now(_dt.timezone.utc)
                    + _dt.timedelta(seconds=JWT_LIFETIME_SECONDS))
         expires_at = expires.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return {"SNOWFLAKE_JSON": json.dumps({
+    blob = {
         "account": record["account"],
         "host": account_host(record["account"]),
         "user": record["service_user"],
@@ -242,7 +249,11 @@ def mint(record: dict, secret: str) -> dict:
         "token": bearer(record, secret),
         "token_type": token_type(record),
         "expires_at": expires_at,
-    }, indent=2)}
+    }
+    if is_pat(record):
+        # Not secret: the sandbox needs it to show the bypass re-arm statement.
+        blob["token_name"] = record["token_name"]
+    return {"SNOWFLAKE_JSON": json.dumps(blob, indent=2)}
 
 
 def revoke(record: dict, secret: str) -> None:
@@ -302,7 +313,7 @@ def provision(record_in: dict, secret: str, *, ctx) -> dict:
             f"  account: {record_in['account']}\n"
             f"  user:    {record_in['service_user']}\n"
             f"  role:    {record_in.get('role')}\n"
-            f"{NETWORK_POLICY_HINT}\n"
+            f"{network_policy_hint(record_in)}\n"
             "Otherwise, check that you pasted the token_secret value whole, and that "
             "the PAT was created with ROLE_RESTRICTION set to this role.")
     if status != 200:
@@ -344,7 +355,8 @@ def verify(record: dict, env: dict, *, ctx) -> list[dict]:
         "name": "snowflake_read",
         "expected": "200", "actual": str(status),
         "passed": read_ok,
-        "detail": "" if read_ok else _error_text(status, data),
+        "detail": "" if read_ok else _error_text(status, data) + (
+            "\n" + network_policy_hint(record) if is_pat(record) else ""),
     })
 
     expected_role = (record.get("role") or "").upper()
@@ -518,7 +530,14 @@ def pat_create_sql(user: str, token_name: str, role: str, *, today: str) -> str:
     return (f'ALTER USER "{user}" ADD PROGRAMMATIC ACCESS TOKEN {token_name}\n'
             f"  ROLE_RESTRICTION = '{role}'\n"
             f"  DAYS_TO_EXPIRY = {PAT_DAYS_TO_EXPIRY}\n"
+            f"  MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = {PAT_BYPASS_MINUTES}\n"
             f"  COMMENT = 'Read-only sandbox for Claude Code, created {today}.';")
+
+
+def pat_rearm_sql(record: dict) -> str:
+    return (f'ALTER USER "{record["service_user"]}" MODIFY PROGRAMMATIC ACCESS TOKEN '
+            f'{record["token_name"]} SET MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = '
+            f'{PAT_BYPASS_MINUTES};')
 
 
 def pat_remove_sql(record: dict) -> str:

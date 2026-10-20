@@ -227,7 +227,7 @@ argless broker that keeps the durable secret out of the sandbox AND out of the m
   **PAT alternative, for when no admin is available.** `bind-snowflake` asks which method
   to use. With a PAT, the engineer runs one printed statement in Snowsight on their **own**
   user — `ALTER USER "<you>" ADD PROGRAMMATIC ACCESS TOKEN <name> ROLE_RESTRICTION='<role>'
-  DAYS_TO_EXPIRY=30` — and pastes the `token_secret` into a secure-input dialog. No admin
+  DAYS_TO_EXPIRY=30 MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT=1440` — and pastes the `token_secret` into a secure-input dialog. No admin
   is involved, and nothing waits: the bind tests the PAT and installs the broker at once.
   The trade-offs are deliberate:
   - The broker writes the **PAT itself** to the runtime file (`token_type` =
@@ -235,10 +235,12 @@ argless broker that keeps the durable secret out of the sandbox AND out of the m
     such exchange. A leaked copy works until the PAT expires, at most 30 days.
   - Queries run as the engineer's own user, under the restricted role only.
   - Snowflake accepts a PAT from a person-type user only while a network policy covers
-    that user. Engineers add a temporary one when they use the sandbox; if Snowflake
-    rejects the PAT, the agent tells the user to add it. `bind-snowflake` asks for it in
-    a dialog before the PAT steps (shown even with `--yes`), and if the test login still
-    fails, offers to retry with the same PAT.
+    that user, or while the PAT's own network-policy bypass lasts (at most 24 hours).
+    The create statement sets the bypass, so no policy is needed. Once it ends, the bind
+    test, `verify`, and the sandbox agent show the exact statement that re-arms it, with
+    the user and token names filled in: `ALTER USER "<you>" MODIFY PROGRAMMATIC ACCESS
+    TOKEN <name> SET MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = 1440`. If the test
+    login fails, `bind-snowflake` offers to retry with the same PAT.
   - `verify` fails `snowflake_pat_expiry` once 7 or fewer days are left. Running
     `bind-snowflake` again offers to renew a PAT binding: paste a new PAT, and the name,
     role and settings stay.

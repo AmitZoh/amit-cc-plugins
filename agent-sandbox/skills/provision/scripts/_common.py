@@ -1517,7 +1517,7 @@ Snowflake (read-only role):
   sudo -u __USER__ /usr/local/bin/claude-ro-mint-snowflake
     -> writes /usr/local/claude-ro-runtime/snowflake/<name>.json per account (prints '<name> <path>').
   That JSON holds token and token_type (KEYPAIR_JWT or PROGRAMMATIC_ACCESS_TOKEN), plus the
-  non-secret host, user, role, warehouse, and expires_at.
+  non-secret host, user, role, warehouse, expires_at, and (for a PAT) token_name.
   POST https://<host>/api/v2/statements with headers
     Authorization: Bearer <token>
     X-Snowflake-Authorization-Token-Type: <token_type from that JSON>
@@ -1528,8 +1528,11 @@ Snowflake (read-only role):
   The credential cannot select another role, but the session still inherits whatever the
   PUBLIC pseudo-role holds account-wide — PUBLIC is granted to every user and every role.
   A KEYPAIR_JWT expires in under an hour: re-run the broker for a fresh one, do NOT cache it.
-  If Snowflake rejects a PROGRAMMATIC_ACCESS_TOKEN, tell the user to add their temporary
-  network policy, then retry.
+  If Snowflake rejects a PROGRAMMATIC_ACCESS_TOKEN, its 24-hour network-policy bypass has
+  likely ended. Give the user this statement, filled from that JSON, to run in Snowsight,
+  then retry:
+    ALTER USER "<user>" MODIFY PROGRAMMATIC ACCESS TOKEN <token_name>
+      SET MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = 1440;
 SF
 fi
 for b in /usr/local/bin/claude-ro-mint-aws-*; do

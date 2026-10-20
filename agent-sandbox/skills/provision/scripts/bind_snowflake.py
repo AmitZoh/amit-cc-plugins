@@ -382,7 +382,6 @@ def _bind_pat(account: str, user: str, warehouse: str, role: str, name: str, *,
     }
     if warehouse:
         record["warehouse"] = warehouse
-    _remind_network_policy()
     secret = _capture_pat(record, today)
     _probe_pat(record, secret, ctx=ctx)
 
@@ -410,7 +409,6 @@ def _renew_pat(record: dict, *, ctx: common.Ctx) -> None:
                "token_name": snow.pat_token_name(record["name"], datetime.datetime.now()),
                "expires_at": snow.pat_expires_at(today),
                "granted_at": common.now_iso()}
-    _remind_network_policy()
     secret = _capture_pat(renewed, today)
     _probe_pat(renewed, secret, ctx=ctx)
     common.secret_store(record["secret_ref"], secret, ctx=ctx)
@@ -422,16 +420,6 @@ def _renew_pat(record: dict, *, ctx: common.Ctx) -> None:
     if renewed["token_name"] != record["token_name"]:
         print("\nThe old PAT still works until it expires. To end it now, run this in "
               f"Snowsight:\n\n    {old_remove}\n", file=sys.stderr)
-
-
-def _remind_network_policy() -> None:
-    """A dialog, not a printed line: binds run in the background, so printed output
-    reaches the user late or not at all. No ctx, so --yes cannot skip it."""
-    if not common.prompt_yes_no(
-            "Add your temporary network policy in Snowflake now. The PAT test login "
-            "fails without it."):
-        raise SystemExit("canceled — run bind-snowflake again once the network "
-                         "policy is active.")
 
 
 def _probe_pat(record: dict, secret: str, *, ctx: common.Ctx) -> None:
@@ -446,8 +434,8 @@ def _probe_pat(record: dict, secret: str, *, ctx: common.Ctx) -> None:
         except SystemExit as exc:
             print(exc, file=sys.stderr)
             if not common.prompt_yes_no(
-                    "Snowflake rejected the PAT. Check the network policy, then "
-                    "retry?"):
+                    "Snowflake rejected the PAT. The console shows why, and the "
+                    "statement that re-arms its network-policy bypass. Retry?"):
                 raise
 
 
@@ -466,6 +454,7 @@ def _capture_pat(record: dict, today: datetime.date) -> str:
     common.show_copyable(
         "Run this in a Snowsight worksheet. It creates a PAT on your own user that can "
         f"only use {record['role']} and expires in {snow.PAT_DAYS_TO_EXPIRY} days. "
+        f"It works without a network policy for {snow.PAT_BYPASS_MINUTES // 60} hours. "
         f"{where}Then copy the token_secret value from the result — Snowflake shows "
         "it only once — and click Continue.", sql)
     secret = common.prompt_secret("Paste the token_secret value").strip()
