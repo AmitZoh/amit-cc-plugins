@@ -799,7 +799,7 @@ When `Keep mine` is chosen, append a `Custom hook preserved: <path>` line to the
 
 1. Create the hook file at the location above with this content (skipped on `Keep mine`). The hook reads from the relocated log path and **degrades gracefully** if the path doesn't exist (so collaborators cloning the repo without auto-commit installed don't get hook crashes).
 
-   The hook never bothers the user about an error the cron has already recovered from: when a commit landed after the last logged line and nothing is left unpushed, it empties the log in pure bash and prints nothing. This covers every error type, `OFFLINE:` lines included. Only an unrecovered error reaches the assistant, which offers **Retry now** (recommended), **Clear**, or **Keep**.
+   The hook never bothers the user about an error the cron has already recovered from: when nothing is left unpushed and either a commit landed after the last logged line or the working tree is clean with github.com reachable, it empties the log in pure bash and prints nothing. The clean-tree case covers a repo that had nothing to commit after the error, so no new commit can show recovery. This covers every error type, `OFFLINE:` lines included. Only an unrecovered error reaches the assistant, which offers **Retry now** (recommended), **Clear**, or **Keep**.
 
    ```bash
    #!/bin/bash
@@ -829,14 +829,23 @@ When `Keep mine` is chosen, append a `Custom hook preserved: <path>` line to the
    last_line=$(grep -E '^\[[^]]+\] ' "$LOG_PATH" | tail -n 1)
    ts=$(printf '%s' "$last_line" | sed -nE 's/^\[([^]]+)\].*/\1/p')
 
-   # Recovered = a commit at/after the latest error AND nothing left unpushed.
-   # A local commit alone is not recovery: the cron commits before it pushes.
+   # Recovered = nothing left unpushed AND either a commit at/after the latest
+   # error, or a clean working tree while github.com is reachable. A local
+   # commit alone is not recovery: the cron commits before it pushes. The
+   # clean-tree case covers a repo with nothing to commit since the error.
    if [ -n "$ts" ] && [ -d "$PROJECT_PATH/.git" ]; then
-       recovery=$(git -C "$PROJECT_PATH" log --since="$ts" --pretty=format:'%h' -1 2>/dev/null)
        unpushed=$(git -C "$PROJECT_PATH" rev-list --count '@{u}..HEAD' 2>/dev/null)
-       if [ -n "$recovery" ] && [ "$unpushed" = "0" ]; then
-           : > "$LOG_PATH"
-           exit 0
+       if [ "$unpushed" = "0" ]; then
+           recovery=$(git -C "$PROJECT_PATH" log --since="$ts" --pretty=format:'%h' -1 2>/dev/null)
+           if [ -z "$recovery" ] \
+               && tree=$(git -C "$PROJECT_PATH" status --porcelain 2>/dev/null) && [ -z "$tree" ] \
+               && curl -s -o /dev/null --max-time 5 https://github.com; then
+               recovery="clean"
+           fi
+           if [ -n "$recovery" ]; then
+               : > "$LOG_PATH"
+               exit 0
+           fi
        fi
    fi
 
@@ -845,8 +854,9 @@ When `Keep mine` is chosen, append a `Custom hook preserved: <path>` line to the
        echo "There are unrecovered auto-commit errors in:"
        echo "  - $LOG_PATH ($lines line(s) since the last clear)"
        echo "The repo is at $PROJECT_PATH; the launchd job label is $LABEL."
-       echo "The hook already checked recovery: no commit landed after the latest"
-       echo "error, or commits are still unpushed."
+       echo "The hook already checked recovery: commits are still unpushed, or no"
+       echo "commit landed after the latest error while the working tree has"
+       echo "changes or github.com was unreachable."
        echo ""
        echo "Do ALL of the following BEFORE calling AskUserQuestion:"
        echo "  1. Read the log file. Find the MOST RECENT line that starts with"
