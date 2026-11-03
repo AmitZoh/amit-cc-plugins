@@ -1413,8 +1413,10 @@ def stable_skills_dir() -> pathlib.Path:
     A plugin install runs from <plugins>/cache/<marketplace>/<plugin>/<version>/, and
     Claude Code DELETES old version folders after an update — a link to one dangles
     (1.2.0 did, and every broker failed with `No module named '_common'`). The
-    marketplace checkout at known_marketplaces.json's installLocation is updated IN
-    PLACE, so it always holds the latest code and its path never changes.
+    marketplace checkout at known_marketplaces.json's installLocation keeps the same
+    path and always holds the latest code. A marketplace update deletes and re-clones
+    it, so the link dangles only while that clone runs, or until a failed clone is
+    retried.
 
     Outside the cache layout (a local clone, a personal skill, or this code already
     reached through SKILLS_LINK) SKILL_DIR.parent is itself stable, so use it as-is.
