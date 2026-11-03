@@ -331,6 +331,32 @@ def phase_local_keychain(*, ctx: common.Ctx) -> None:
     common.log.info("configured %s as claude-ro default+login keychain (auto-lock off)", kc)
 
 
+_STABLE_LINK_BINARIES = ("claude",)
+
+
+def _stable_link_target(binary: str, ulb_path: str) -> str | None:
+    """Return the user's own PATH entry for <binary> (searched without
+    /usr/local/bin, so the link never points at itself), or None if
+    /usr/local/bin/<binary> already links to exactly that entry."""
+    saved_path = os.environ.get("PATH", "")
+    try:
+        os.environ["PATH"] = ":".join(p for p in saved_path.split(":") if p != "/usr/local/bin")
+        user_path = shutil.which(binary)
+    finally:
+        os.environ["PATH"] = saved_path
+    if not user_path:
+        raise SystemExit(
+            f"{binary} not found on the user's PATH outside /usr/local/bin. "
+            f"Install it, or place it at {ulb_path} before running init."
+        )
+    user_path = os.path.abspath(user_path)
+    if not os.path.exists(user_path):
+        raise SystemExit(f"{binary} on the user's PATH ({user_path}) is a broken symlink. Reinstall.")
+    if os.path.islink(ulb_path) and os.readlink(ulb_path) == user_path:
+        return None
+    return user_path
+
+
 def _binary_symlink_target(binary: str) -> str | None:
     """Compute the canonical real path that /usr/local/bin/<binary> should
     point at, or None if no symlink work is needed (real file present, or
@@ -345,10 +371,18 @@ def _binary_symlink_target(binary: str) -> str | None:
 
     If /usr/local/bin/<binary> already exists AS A REAL FILE (not a symlink),
     we leave it alone — the user put it there deliberately and we're not in
-    the business of overwriting their binaries."""
+    the business of overwriting their binaries.
+
+    Exception: binaries in _STABLE_LINK_BINARIES point at the user's own PATH
+    entry (e.g. ~/.local/bin/claude), NOT its real path. Claude Code's
+    native installer re-points that link to versions/<x.y.z> on each update
+    and deletes old version files, so a link to the real path dangles once
+    the pinned version is pruned."""
     ulb_path = f"/usr/local/bin/{binary}"
     if os.path.exists(ulb_path) and not os.path.islink(ulb_path):
         return None
+    if binary in _STABLE_LINK_BINARIES:
+        return _stable_link_target(binary, ulb_path)
     user_path = shutil.which(binary)
     if not user_path:
         raise SystemExit(
