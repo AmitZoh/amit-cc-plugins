@@ -56,7 +56,7 @@ The launcher takes optional flags — `claude-ro [--account ID] [--profile NAME]
 
 ## Where installed files point
 
-`init` creates `/usr/local/claude-ro-skills`, a root-owned symlink to the plugin's `skills/` directory. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through it, so none of them stores a real path, and `~/.claude/skills/cred-sweep` is linked through it too rather than at the version-numbered plugin cache. One link moves on an update; nothing else has to.
+`init` creates `/usr/local/claude-ro-skills`, a root-owned symlink to the plugin's `skills/` directory in the marketplace checkout (`~/.claude/plugins/marketplaces/<marketplace>/agent-sandbox/skills`), not in the version-numbered plugin cache. Claude Code updates the marketplace checkout in place, so the link always reaches the latest code and does not move on an update. Claude Code deletes old cache version folders, so a link to one of them stops working. The brokers in `/usr/local/bin` and the lockdown launchd job reach the code through the link, so none of them stores a real path, and `~/.claude/skills/cred-sweep` is linked through it too. When the plugin runs from a local clone, the link targets that clone's `skills/` directory. `verify` stops with an error when the link does not reach the provision scripts.
 
 After updating the plugin — or moving between a local clone and an installed copy — run `/agent-sandbox:provision refresh-settings` to repoint it and re-render everything that uses it.
 

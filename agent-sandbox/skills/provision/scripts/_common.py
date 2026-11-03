@@ -1407,6 +1407,59 @@ def ensure_secrets_dir(*, ctx: Ctx | None = None) -> None:
     log.info("ensured secrets dir %s (owner %s, 700 + deny-ACE)", SECRETS_DIR, user)
 
 
+def stable_skills_dir() -> pathlib.Path:
+    """The skills/ directory SKILLS_LINK should target: one that survives a plugin update.
+
+    A plugin install runs from <plugins>/cache/<marketplace>/<plugin>/<version>/, and
+    Claude Code DELETES old version folders after an update — a link to one dangles
+    (1.2.0 did, and every broker failed with `No module named '_common'`). The
+    marketplace checkout at known_marketplaces.json's installLocation is updated IN
+    PLACE, so it always holds the latest code and its path never changes.
+
+    Outside the cache layout (a local clone, a personal skill, or this code already
+    reached through SKILLS_LINK) SKILL_DIR.parent is itself stable, so use it as-is.
+    Inside the cache layout, a lookup failure raises rather than falling back to the
+    version folder, which would silently re-create the dangling-link bug."""
+    version_dir = SKILL_DIR.parent.parent
+    plugin = version_dir.parent.name
+    marketplace_cache = version_dir.parent.parent
+    if marketplace_cache.parent.name != "cache":
+        return SKILL_DIR.parent
+    marketplace = marketplace_cache.name
+    plugins_dir = marketplace_cache.parent.parent
+    known_path = plugins_dir / "known_marketplaces.json"
+    try:
+        location = pathlib.Path(
+            json.loads(known_path.read_text())[marketplace]["installLocation"])
+        manifest = json.loads(
+            (location / ".claude-plugin" / "marketplace.json").read_text())
+        source = next(p["source"] for p in manifest["plugins"] if p["name"] == plugin)
+    except (OSError, ValueError, KeyError, StopIteration) as exc:
+        raise SystemExit(
+            f"cannot find the {marketplace} marketplace checkout for plugin {plugin!r} "
+            f"via {known_path}: {exc!r}")
+    if not isinstance(source, str):
+        raise SystemExit(
+            f"plugin {plugin!r} has a non-path source {source!r} in {marketplace}'s "
+            f"marketplace.json, so there is no in-place checkout to link to")
+    target = location / source / "skills"
+    if not (target / SKILL_DIR.name / "scripts" / "_common.py").is_file():
+        raise SystemExit(f"marketplace checkout {target} has no "
+                         f"{SKILL_DIR.name}/scripts/_common.py")
+    return target
+
+
+def skills_link_problem() -> str | None:
+    """None when SKILLS_LINK resolves to a directory holding the provision scripts;
+    otherwise a one-line description of what is wrong with it."""
+    if not SKILLS_LINK.is_symlink():
+        return f"{SKILLS_LINK} does not exist or is not a symlink"
+    target = os.readlink(SKILLS_LINK)
+    if not (SKILL_SCRIPTS_LINK / "_common.py").is_file():
+        return f"{SKILLS_LINK} → {target}, which has no {SKILL_DIR.name}/scripts/_common.py"
+    return None
+
+
 def ensure_skill_symlink(*, ctx: Ctx | None = None) -> None:
     """Point SKILLS_LINK at the plugin's skills/ directory, root-owned. Idempotent —
     re-running repoints an existing link rather than failing, which is what makes
@@ -1419,7 +1472,7 @@ def ensure_skill_symlink(*, ctx: Ctx | None = None) -> None:
 
     Must run BEFORE anything that renders SKILL_SCRIPTS_LINK into an installed
     file, otherwise those files reference a link that does not exist yet."""
-    skills_dir = SKILL_DIR.parent
+    skills_dir = stable_skills_dir()
     if ctx is not None and ctx.dry_run:
         log.info("[dry-run] would symlink %s → %s", SKILLS_LINK, skills_dir)
         return

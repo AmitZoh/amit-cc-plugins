@@ -152,6 +152,16 @@ def main() -> None:
         ap.error(f"provider {args.provider!r} not yet implemented")
 
     ctx = common.Ctx.from_args(args)
+
+    # Every broker imports its code through SKILLS_LINK. A dangling link makes them
+    # all fail with `No module named '_common'`, which names neither the link nor the fix.
+    link_problem = common.skills_link_problem()
+    if link_problem:
+        print(f"✗ {link_problem}\n  Every broker fails until this is fixed. "
+              "Run `/agent-sandbox:provision refresh-settings` to repoint it.",
+              file=sys.stderr)
+        sys.exit(1)
+
     state = common.state_read(validate=True)
 
     total_passed = 0

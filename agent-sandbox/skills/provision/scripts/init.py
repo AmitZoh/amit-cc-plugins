@@ -197,7 +197,7 @@ def phase_local_kube_dir(*, ctx: common.Ctx) -> None:
 
 
 def phase_local_stable_skill_link_actions(*, ctx: common.Ctx) -> list[str]:
-    return [f"create symlink {common.SKILLS_LINK} → {common.SKILL_DIR.parent}"]
+    return [f"create symlink {common.SKILLS_LINK} → {common.stable_skills_dir()}"]
 
 
 def phase_local_stable_skill_link(*, ctx: common.Ctx) -> None:
